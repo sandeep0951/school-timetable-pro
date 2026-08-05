@@ -1,2 +1,3 @@
-# school-timetable-pro
-school timetable 
+streamlit
+   pandas
+   starlette==0.38.2
