@@ -1,9 +1,2 @@
-<<<<<<< HEAD
-streamlit
+streamlit>=1.40.0
    pandas
-   starlette==0.38.2
-=======
-streamlit==1.38.0
-pandas
-starlette==0.38.2
->>>>>>> 93736569ac8af261a0dc6e436191b162816b7649
