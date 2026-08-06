@@ -29,25 +29,93 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1, 2, 3, 4 (Standard Configuration)
+# TAB 1: Number of hours & Periods
 # ==========================================
 with tab1:
-    st.header("School Timings & Periods")
-    total_periods = st.number_input("Total Number of Periods", min_value=1, max_value=15, value=8)
+    st.header("School Timings & Periods Configuration")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("1. Working Hours & Structure")
+        school_start = st.time_input("School Start Time", value=time(8, 0))
+        total_periods = st.number_input("Total Number of Periods", min_value=1, max_value=15, value=8)
+        break_period = st.number_input("Break happens AFTER which period?", min_value=1, max_value=10, value=4)
+        
+    with col2:
+        st.subheader("2. Custom Period Durations")
+        st.write("Aap har period ka time alag set kar sakte hain:")
+        
+        if 'last_total' not in st.session_state or st.session_state.last_total != total_periods or st.session_state.last_break != break_period:
+            slots = []
+            for i in range(1, total_periods + 1):
+                duration = 50 if i == 1 else 45
+                slots.append({"Slot": f"Period {i}", "Duration (Mins)": duration})
+                if i == break_period:
+                    slots.append({"Slot": "LUNCH BREAK", "Duration (Mins)": 30})
+                    
+            st.session_state.periods_timing_df = pd.DataFrame(slots)
+            st.session_state.last_total = total_periods
+            st.session_state.last_break = break_period
+            
+        st.session_state.periods_timing_df = st.data_editor(
+            st.session_state.periods_timing_df, 
+            use_container_width=True, 
+            hide_index=True
+        )
 
+# ==========================================
+# TAB 2: Number of Classes
+# ==========================================
 with tab2:
     st.header("Classes Configuration")
+    
     if 'classes_df' not in st.session_state:
         st.session_state.classes_df = pd.DataFrame({"Class Name": ["9th A", "10th A", "11th Sci", "12th Comm"]})
-    st.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
+    
+    st.session_state.classes_df = st.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
 
+# ==========================================
+# TAB 3: Teachers, Subjects & Leaves
+# ==========================================
 with tab3:
-    st.header("Teachers & Leaves Directory")
-    st.info("Teachers directory loaded successfully.")
+    st.header("Teachers, Subjects & Leaves Directory")
+    
+    if 'teachers_df' not in st.session_state:
+        st.session_state.teachers_df = pd.DataFrame({
+            "Teacher Name": ["Mr. Sharma", "Ms. Verma", "Mr. Gupta"],
+            "Subject 1": ["Maths", "Science", "English"],
+            "Subject 2": ["Physics", "Biology", "Hindi"],
+            "Special Topic/Class": ["Olympiad (10th A)", "Lab (11th Sci)", "Debate (9th A)"],
+            "Leave From (Date)": ["", "15-Aug-2026", ""],
+            "Leave To (Date)": ["", "20-Aug-2026", ""]
+        })
+    
+    st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
 
+# ==========================================
+# TAB 4: Conditions & Holidays
+# ==========================================
 with tab4:
-    st.header("Rules & Holidays")
-    st.info("Custom rules engine active.")
+    st.header("Advanced Rules Engine & Holidays")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader("National Holidays")
+        if 'nat_holidays_df' not in st.session_state:
+            st.session_state.nat_holidays_df = pd.DataFrame({"Holiday Name": ["Independence Day", "Republic Day"], "Date": ["15-Aug-2026", "26-Jan-2026"]})
+        st.session_state.nat_holidays_df = st.data_editor(st.session_state.nat_holidays_df, num_rows="dynamic", use_container_width=True, key="nat_hol")
+
+        st.subheader("Local & Authority Holidays")
+        if 'loc_holidays_df' not in st.session_state:
+            st.session_state.loc_holidays_df = pd.DataFrame({"Holiday Name": ["Collector Declared Holiday", "Local Festival"], "Date": ["20-Aug-2026", "05-Sep-2026"]})
+        st.session_state.loc_holidays_df = st.data_editor(st.session_state.loc_holidays_df, num_rows="dynamic", use_container_width=True, key="loc_hol")
+
+    with col2:
+        st.subheader("Conditions")
+        rule_type = st.selectbox("Rule Type", ["If-Then", "Then-only", "Can", "Near by", "After", "Before", "Followed by"])
+        rule_desc = st.text_input("Describe Rule (e.g. 'Maths AFTER Break')")
+        if st.button("Add Rule"):
+            st.success(f"Rule Added: [{rule_type}] {rule_desc}")
 
 # ==========================================
 # TAB 5: Generate & Conflict Resolution (REAL AI)
