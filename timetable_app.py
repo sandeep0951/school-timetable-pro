@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, time
 import time as time_module
 from groq import Groq
+import json
 
 # App Configuration
 st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
@@ -25,7 +26,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "👨‍🏫 3. Teachers & Leaves", 
     "⚙️ 4. Rules & Holidays", 
     "🚀 5. Generate & Resolve",
-    "🪄 6. AI Prompt Builder"
+    "💬 6. AI Co-Pilot (2-Way Chat)"
 ])
 
 # ==========================================
@@ -82,12 +83,12 @@ with tab3:
     
     if 'teachers_df' not in st.session_state:
         st.session_state.teachers_df = pd.DataFrame({
-            "Teacher Name": ["Mr. Sharma", "Ms. Verma", "Mr. Gupta"],
-            "Subject 1": ["Maths", "Science", "English"],
-            "Subject 2": ["Physics", "Biology", "Hindi"],
-            "Special Topic/Class": ["Olympiad (10th A)", "Lab (11th Sci)", "Debate (9th A)"],
-            "Leave From (Date)": ["", "15-Aug-2026", ""],
-            "Leave To (Date)": ["", "20-Aug-2026", ""]
+            "Teacher Name": ["Mr. Sharma", "Ms. Verma", "Mr. Gupta", "Sandip Sir", "Nikum Sir", "Banshi Sir"],
+            "Subject 1": ["Maths", "Science", "English", "Maths", "Maths", "Hindi"],
+            "Subject 2": ["Physics", "Biology", "Hindi", "-", "-", "Social"],
+            "Special Topic/Class": ["Olympiad (10th A)", "Lab (11th Sci)", "Debate (9th A)", "-", "-", "-"],
+            "Leave From (Date)": ["", "15-Aug-2026", "", "", "", ""],
+            "Leave To (Date)": ["", "20-Aug-2026", "", "", "", ""]
         })
     
     st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
@@ -118,7 +119,7 @@ with tab4:
             st.success(f"Rule Added: [{rule_type}] {rule_desc}")
 
 # ==========================================
-# TAB 5: Generate & Conflict Resolution (REAL AI)
+# TAB 5: Generate & Conflict Resolution (Python Logic Engine)
 # ==========================================
 with tab5:
     st.header("Timetable Generation & Conflict Resolution")
@@ -138,7 +139,6 @@ with tab5:
         with col_sol:
             st.success("**C. Default Solution**\nSystem assigned 'Library'.")
         
-        # --- AI PROMPT CONFLICT RESOLUTION ---
         st.markdown("---")
         st.subheader("🪄 Resolve Contradiction with AI Prompt")
         
@@ -153,7 +153,6 @@ with tab5:
             elif resolve_prompt:
                 with st.spinner("AI is processing your override command..."):
                     try:
-                        # Real Groq AI Call
                         completion = client.chat.completions.create(
                             model="llama-3.1-8b-instant",
                             messages=[
@@ -171,40 +170,66 @@ with tab5:
             else:
                 st.warning("⚠️ Pehle instruction likhiye!")
 
+        st.markdown("---")
+        st.subheader(f"Generated Timetable for {target_date.strftime('%d-%b-%Y')} (Python Engine)")
+        
+        total_rows_to_show = total_periods + 1
+        dummy_tt = pd.DataFrame({
+            "Period": ["1", "2", "3", "Break", "4", "5", "6", "7", "8"],
+            "Time": ["08:00 - 08:50", "08:50 - 09:35", "09:35 - 10:20", "10:20 - 10:50", "10:50 - 11:35", "11:35 - 12:20", "12:20 - 13:05", "13:05 - 13:50", "13:50 - 14:35"],
+            "9th A": ["English", "Hindi", "Science", "LUNCH", "Maths", "Sports", "Library", "Art", "Free"],
+            "10th A": ["Science", "English", "Library (Proxy)", "LUNCH", "Hindi", "Maths", "Sports", "History", "Free"]
+        })
+        display_tt = dummy_tt.head(total_rows_to_show) if total_rows_to_show <= len(dummy_tt) else dummy_tt
+        st.dataframe(display_tt, use_container_width=True, hide_index=True)
+
 # ==========================================
-# TAB 6: AI Prompt Builder (REAL AI GENERATION)
+# TAB 6: AI Co-Pilot (2-Way Chat)
 # ==========================================
 with tab6:
-    st.header("🪄 AI Prompt Builder (Describe & Generate)")
-    st.write("Apne shabdon mein bataiye kaisa timetable chahiye, aur Llama-3 AI usko banayega.")
+    st.header("💬 AI Co-Pilot (2-Way Communication)")
+    st.write("Ab aap AI ke sath baatcheet karke timetable modify karwa sakte hain. AI aapki purani baatein yaad rakhega!")
     
-    ai_prompt = st.text_area(
-        "Describe your requirement (Hindi or English):", 
-        placeholder="Example: '9th A aur 10th A ka Monday ka timetable banao jisme 8 periods hon. Pehla period maths aur aakhri sports ho.'",
-        height=150
-    )
-    
-    if st.button("✨ Generate with AI Prompt", type="primary"):
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = [
+            {"role": "system", "content": "You are a helpful school timetable assistant for Sandeep. IMPORTANT RULE: A teacher CANNOT be in two classes at the same time. Never violate this. Help him refine the timetable step-by-step. Speak in a friendly mix of Hindi and English (Hinglish)."},
+            {"role": "assistant", "content": "Namaste Sandeep Sir! Main aapka AI Co-Pilot hoon. Bataiye, timetable mein kya set karna hai ya kaunsa badlav karna hai?"}
+        ]
+
+    # Display chat messages from history on app rerun
+    for message in st.session_state.messages:
+        if message["role"] != "system": # Hide the system prompt from the UI
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+    # React to user input
+    if prompt := st.chat_input("Apna instruction yahan likhein..."):
+        # Display user message in chat message container
+        st.chat_message("user").markdown(prompt)
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
         if not client:
-            st.error("❌ Groq API Key Streamlit Secrets mein nahi mili! Pehle use set karein.")
-        elif ai_prompt:
-            with st.spinner("Groq AI aapka prompt samajh raha aur timetable bana raha hai..."):
+            st.error("❌ Groq API Key Streamlit Secrets mein nahi mili!")
+        else:
+            with st.spinner("AI soch raha hai..."):
                 try:
-                    # Real Groq AI Call for Timetable Generation
+                    # Send entire history to Groq for context
                     completion = client.chat.completions.create(
                         model="llama-3.1-8b-instant",
-                        messages=[
-                            {"role": "system", "content": "You are a logical school timetable generator. Based on the user's prompt, generate a visually clean timetable using a Markdown table. Do NOT write long paragraphs, just provide the Markdown table and a single line of confirmation."},
-                            {"role": "user", "content": ai_prompt}
-                        ],
-                        temperature=0.5,
+                        messages=st.session_state.messages,
+                        temperature=0.4,
                     )
-                    ai_tt_response = completion.choices[0].message.content
                     
-                    st.success("✅ AI ne aapka prompt successfully process kar liya hai!")
-                    st.markdown(ai_tt_response)
+                    response = completion.choices[0].message.content
+                    
+                    # Display assistant response in chat message container
+                    with st.chat_message("assistant"):
+                        st.markdown(response)
+                    
+                    # Add assistant response to chat history
+                    st.session_state.messages.append({"role": "assistant", "content": response})
                     
                 except Exception as e:
                     st.error(f"Error connecting to Groq API: {e}")
-        else:
-            st.warning("⚠️ Pehle prompt box mein apni requirement likhiye!")
