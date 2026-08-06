@@ -1,3 +1,4 @@
-streamlit==1.37.0
-   pandas
-   starlette==0.38.2
+streamlit
+pandas
+starlette==0.38.2
+groq
