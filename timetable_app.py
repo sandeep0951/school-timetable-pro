@@ -87,7 +87,7 @@ with tab5:
                     try:
                         # Real Groq AI Call
                         completion = client.chat.completions.create(
-                            model="llama3-8b-8192",
+                            model="llama-3.1-8b-instant",
                             messages=[
                                 {"role": "system", "content": "You are a smart school timetable assistant. Briefly confirm the user's action in a professional tone, explaining how the schedule is updated based on their prompt."},
                                 {"role": "user", "content": f"The original issue was Ms. Verma being on leave for 10th A. Please confirm this update: {resolve_prompt}"}
@@ -120,11 +120,11 @@ with tab6:
         if not client:
             st.error("❌ Groq API Key Streamlit Secrets mein nahi mili! Pehle use set karein.")
         elif ai_prompt:
-            with st.spinner("Groq AI aapka prompt samajh raha hai aur timetable bana raha hai..."):
+            with st.spinner("Groq AI aapka prompt samajh raha aur timetable bana raha hai..."):
                 try:
                     # Real Groq AI Call for Timetable Generation
                     completion = client.chat.completions.create(
-                        model="llama3-8b-8192",
+                        model="llama-3.1-8b-instant",
                         messages=[
                             {"role": "system", "content": "You are a logical school timetable generator. Based on the user's prompt, generate a visually clean timetable using a Markdown table. Do NOT write long paragraphs, just provide the Markdown table and a single line of confirmation."},
                             {"role": "user", "content": ai_prompt}
@@ -134,7 +134,7 @@ with tab6:
                     ai_tt_response = completion.choices[0].message.content
                     
                     st.success("✅ AI ne aapka prompt successfully process kar liya hai!")
-                    st.markdown(ai_tt_response) # Displays the Markdown table directly from AI
+                    st.markdown(ai_tt_response)
                     
                 except Exception as e:
                     st.error(f"Error connecting to Groq API: {e}")
