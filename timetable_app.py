@@ -30,7 +30,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1, 2, 3, 4, 5 (Safe & Unchanged)
+# TAB 1, 2, 3, 4 (Configuration)
 # ==========================================
 with tab1:
     st.header("School Timings & Periods Configuration")
@@ -84,27 +84,67 @@ with tab4:
         if st.button("Add Rule"):
             st.success(f"Rule Added: [{rule_type}] {rule_desc}")
 
+# ==========================================
+# TAB 5: Python Engine & AI Data Bridge
+# ==========================================
 with tab5:
     st.header("Timetable Generation & Conflict Resolution")
     target_date = st.date_input("Target Date for Timetable", datetime.today())
+    
+    st.markdown("---")
+    st.subheader("🧠 1. Fetch AI Rules (Bridge from Tab 6)")
+    st.write("Tab 6 mein AI se hui baatcheet ko yahan JSON rules mein convert karein:")
+    
+    if st.button("🔄 Extract Rules from AI Chat"):
+        if not client:
+            st.error("Groq API Key missing!")
+        elif "chat_messages" not in st.session_state or len(st.session_state.chat_messages) <= 2:
+            st.warning("⚠️ Pehle Tab 6 mein AI se kuch rules discuss karein!")
+        else:
+            with st.spinner("Translating Chat History into Python Constraints..."):
+                chat_history = str(st.session_state.chat_messages)
+                extraction_prompt = f"Extract all timetable rules and constraints from this chat history into a strict JSON format. ONLY output JSON. Format: {{'rules': ['rule 1', 'rule 2'], 'teachers_mentioned': []}}. Chat History: {chat_history}"
+                
+                try:
+                    completion = client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=[{"role": "user", "content": extraction_prompt}],
+                        temperature=0.1,
+                        response_format={"type": "json_object"}
+                    )
+                    extracted_data = json.loads(completion.choices[0].message.content)
+                    st.session_state.final_ai_rules = extracted_data
+                    st.success("✅ Rules successfully bridged to Python Engine!")
+                    st.json(extracted_data)
+                except Exception as e:
+                    st.error(f"Failed to extract rules: {e}")
+                    
+    if "final_ai_rules" in st.session_state:
+        st.info("💡 Engine is ready to apply these AI constraints.")
+
+    st.markdown("---")
+    st.subheader("⚙️ 2. Run Python Logic Engine")
     if st.button("🚀 Run Advanced Engine & Generate", type="primary"):
         st.session_state.gen_triggered = True
 
     if st.session_state.get('gen_triggered', False):
-        st.warning("⚠️ **Contradiction Detected**")
+        st.warning("⚠️ **Contradiction Detected (Dummy Logic)**")
         st.success("**C. Default Solution** System assigned 'Library'.")
-        resolve_prompt = st.text_input("Enter resolution instruction:")
-        if st.button("✨ Apply Prompt Fix"):
-            st.success(f"Applied: '{resolve_prompt}'")
-        dummy_tt = pd.DataFrame({"Period": ["1", "2"], "9th A": ["English", "Hindi"], "10th A": ["Science", "English"]})
+        
+        # Simulated Output
+        dummy_tt = pd.DataFrame({
+            "Period": ["1", "2", "3", "Break"], 
+            "9th A": ["English", "Hindi", "Science", "LUNCH"], 
+            "10th A": ["Science", "English", "Library (Proxy)", "LUNCH"]
+        })
         st.dataframe(dummy_tt, use_container_width=True, hide_index=True)
 
 # ==========================================
-# TAB 6: AI Co-Pilot (UPGRADED TO 70B MODEL)
+# TAB 6: AI Co-Pilot (70B MODEL CHAT ONLY)
 # ==========================================
 with tab6:
-    st.header("💬 AI Co-Pilot (Strict Data Extractor)")
-    st.write("Yeh AI ab timetable banayega nahi, balki sirf aapki commands ko verify karke JSON format mein Python Engine ko pass karega.")
+    st.header("💬 AI Co-Pilot (Data Collector)")
+    st.write("Yahan AI se normal language mein baat karein. Yeh sirf data collect karega. Asli table Tab 5 mein banega.")
     
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = [
@@ -114,13 +154,12 @@ with tab6:
                 CRITICAL RULES:
                 1. YOU MUST NEVER GENERATE A TIMETABLE. 
                 2. NEVER write time slots or class schedules.
-                3. Your ONLY job is to listen to the user's constraints, extract the rules, and say: "Maine ye rules Python engine mein save kar diye hain: [List the rules briefly]". 
-                4. Always speak in polite Hinglish. 
-                5. If the user asks for a timetable, tell them: "Main sirf data collect karta hoon, timetable Tab 5 mein Python Engine generate karega."'''
+                3. Your ONLY job is to listen to the user's constraints, extract the rules, and say: "Maine ye rules note kar liye hain. Kripya Tab 5 mein jaakar 'Extract Rules' par click karein." 
+                4. Always speak in polite Hinglish.'''
             },
             {
                 "role": "assistant", 
-                "content": "Namaste Sandeep Sir! Main aapka upgraded AI Assistant hoon. Mujhe apne naye rules bataiye, main unhe direct Python engine ke strict format (0) mein set kar dunga. Main khud koi time-table generate nahi karunga!"
+                "content": "Namaste Sandeep Sir! Main aapka AI Assistant hoon. Mujhe apne naye rules bataiye, main unhe note kar lunga. (Timetable Tab 5 mein generate hoga)."
             }
         ]
 
@@ -136,14 +175,12 @@ with tab6:
         if not client:
             st.error("❌ Groq API Key Streamlit Secrets mein nahi mili!")
         else:
-            with st.spinner("Upgraded AI (70B) is extracting logic..."):
+            with st.spinner("AI is understanding your rules..."):
                 try:
-                    # USING GROQ'S BEST & SMARTEST MODEL: Llama 3.3 70B
-                    # REMOVED max_tokens so it never cuts off mid-sentence
                     completion = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
                         messages=st.session_state.chat_messages,
-                        temperature=0.1, # Extremely low temperature so it stays logical and doesn't hallucinate
+                        temperature=0.1, 
                     )
                     
                     response = completion.choices[0].message.content
