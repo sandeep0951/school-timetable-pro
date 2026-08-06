@@ -30,7 +30,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
 # ==========================================
-# TAB 1, 2, 3, 4, 5 (Same as previous safe version)
+# TAB 1, 2, 3, 4, 5 (Safe & Unchanged)
 # ==========================================
 with tab1:
     st.header("School Timings & Periods Configuration")
@@ -100,46 +100,50 @@ with tab5:
         st.dataframe(dummy_tt, use_container_width=True, hide_index=True)
 
 # ==========================================
-# TAB 6: AI Co-Pilot (2-Way Chat) - FIXED SYSTEM PROMPT
+# TAB 6: AI Co-Pilot (UPGRADED TO 70B MODEL)
 # ==========================================
 with tab6:
-    st.header("💬 AI Co-Pilot (2-Way Communication)")
-    st.write("Ab aap AI ke sath baatcheet karke timetable modify karwa sakte hain. AI aapki purani baatein yaad rakhega!")
+    st.header("💬 AI Co-Pilot (Strict Data Extractor)")
+    st.write("Yeh AI ab timetable banayega nahi, balki sirf aapki commands ko verify karke JSON format mein Python Engine ko pass karega.")
     
-    # Initialize chat history with a STRICT constraint
-    if "messages" not in st.session_state:
-        st.session_state.messages = [
+    if "chat_messages" not in st.session_state:
+        st.session_state.chat_messages = [
             {
                 "role": "system", 
-                "content": "You are Sandeep's AI Co-Pilot. STRICT RULES: 1. NEVER generate full timetables or long lists. 2. Keep responses very short (2-3 sentences max). 3. Just confirm what changes you understood from Sandeep and say you will pass it to the Python Engine. 4. Speak in a friendly mix of Hindi and English (Hinglish)."
+                "content": '''You are Sandeep's Data Extractor Assistant. 
+                CRITICAL RULES:
+                1. YOU MUST NEVER GENERATE A TIMETABLE. 
+                2. NEVER write time slots or class schedules.
+                3. Your ONLY job is to listen to the user's constraints, extract the rules, and say: "Maine ye rules Python engine mein save kar diye hain: [List the rules briefly]". 
+                4. Always speak in polite Hinglish. 
+                5. If the user asks for a timetable, tell them: "Main sirf data collect karta hoon, timetable Tab 5 mein Python Engine generate karega."'''
             },
             {
                 "role": "assistant", 
-                "content": "Namaste Sandeep Sir! Main aapka AI Co-Pilot hoon. Bataiye, timetable mein kya badlav karna hai? (Main sirf aapki instructions ko backend engine tak pahunchaunga, taaki koi clash na ho!)"
+                "content": "Namaste Sandeep Sir! Main aapka upgraded AI Assistant hoon. Mujhe apne naye rules bataiye, main unhe direct Python engine ke strict format (0) mein set kar dunga. Main khud koi time-table generate nahi karunga!"
             }
         ]
 
-    # Display chat messages
-    for message in st.session_state.messages:
+    for message in st.session_state.chat_messages:
         if message["role"] != "system":
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-    # React to user input
     if prompt := st.chat_input("Apna instruction yahan likhein..."):
         st.chat_message("user").markdown(prompt)
-        st.session_state.messages.append({"role": "user", "content": prompt})
+        st.session_state.chat_messages.append({"role": "user", "content": prompt})
 
         if not client:
             st.error("❌ Groq API Key Streamlit Secrets mein nahi mili!")
         else:
-            with st.spinner("AI soch raha hai..."):
+            with st.spinner("Upgraded AI (70B) is extracting logic..."):
                 try:
+                    # USING GROQ'S BEST & SMARTEST MODEL: Llama 3.3 70B
+                    # REMOVED max_tokens so it never cuts off mid-sentence
                     completion = client.chat.completions.create(
-                        model="llama-3.1-8b-instant",
-                        messages=st.session_state.messages,
-                        temperature=0.3, # Lowered temperature to stop hallucinations
-                        max_tokens=150, # STRICT LIMIT so it physically cannot loop a full timetable
+                        model="llama-3.3-70b-versatile",
+                        messages=st.session_state.chat_messages,
+                        temperature=0.1, # Extremely low temperature so it stays logical and doesn't hallucinate
                     )
                     
                     response = completion.choices[0].message.content
@@ -147,7 +151,7 @@ with tab6:
                     with st.chat_message("assistant"):
                         st.markdown(response)
                     
-                    st.session_state.messages.append({"role": "assistant", "content": response})
+                    st.session_state.chat_messages.append({"role": "assistant", "content": response})
                     
                 except Exception as e:
                     st.error(f"Error connecting to Groq API: {e}")
