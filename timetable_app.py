@@ -408,7 +408,7 @@ with tab6:
                 YOUR PROCESS:
                 1. Read the user's input (classes, teachers, periods).
                 2. EXAMINE for logical contradictions (e.g., if a teacher is assigned to 10 classes but there are only 8 periods in a day).
-                3. If you find a contradiction, DO NOT try to fix it silently. Point it out to the user and ask how they want to resolve it (e.g., "Aapne Banshi sir ko 10 classes di hain par periods 8 hi hain. Kya hum ek naya teacher add karein?").
+                3. If you find a contradiction, DO NOT try to fix it silently. Point it out to the user and ask how they want to resolve it.
                 4. If the user's data is incomplete (e.g., missing total periods), ask for it.
                 5. If everything looks logically sound, summarize the data briefly and tell the user to click "Sync AI Rules" in Tab 5.
                 
@@ -423,14 +423,23 @@ with tab6:
             }
         ]
 
-    for message in st.session_state.chat_messages:
-        if message["role"] != "system":
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+    # Create a scrollable container for chat history so it stays ABOVE the input box
+    chat_container = st.container(height=500)
+    
+    with chat_container:
+        for message in st.session_state.chat_messages:
+            if message["role"] != "system":
+                with st.chat_message(message["role"]):
+                    st.markdown(message["content"])
 
+    # Chat input stays pinned at the bottom
     if prompt := st.chat_input("Apna instruction yahan likhein..."):
-        st.chat_message("user").markdown(prompt)
+        
+        # Instantly show the user's message in the container
         st.session_state.chat_messages.append({"role": "user", "content": prompt})
+        with chat_container:
+            with st.chat_message("user"):
+                st.markdown(prompt)
 
         if not client:
             st.error("❌ Groq API Key missing!")
@@ -445,8 +454,10 @@ with tab6:
                     
                     response = completion.choices[0].message.content
                     
-                    with st.chat_message("assistant"):
-                        st.markdown(response)
+                    # Show the AI's response in the container
+                    with chat_container:
+                        with st.chat_message("assistant"):
+                            st.markdown(response)
                     
                     st.session_state.chat_messages.append({"role": "assistant", "content": response})
                 except Exception as e:
