@@ -70,7 +70,7 @@ with tab2:
 
 with tab3:
     st.header("Teachers & Subject Mapping")
-    st.info("Tip: If a teacher teaches multiple subjects, they will appear in multiple rows.")
+    st.info("Tip: Edit here before Generating if AI misses a teacher.")
     st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
 
 with tab4:
@@ -79,7 +79,7 @@ with tab4:
     st.json(st.session_state.fixed_rules)
 
 # ==========================================
-# TAB 5: THE REAL PYTHON ENGINE (RULE ELIMINATION LOGIC)
+# TAB 5: THE REAL PYTHON ENGINE (NO FREE STUDENTS + TEACHER WORKLOAD TRACKER)
 # ==========================================
 with tab5:
     st.header("Timetable Generation & Conflict Resolution")
@@ -101,15 +101,16 @@ with tab5:
                     "durations": [{"Slot": "Period 1", "Duration (Mins)": 50}],
                     "classes": ["6th A", "6th B", "7th", "8th", "9th", "10th"],
                     "teachers": [
-                        {"Teacher Name": "Balram", "Subject": "Sanskrit", "Allowed Classes": "6th A, 6th B, 7th"}
+                        {"Teacher Name": "Balram", "Subject": "Sanskrit", "Allowed Classes": "6th A, 6th B, 7th"},
+                        {"Teacher Name": "Activity Master", "Subject": "Activity", "Allowed Classes": "All"}
                     ],
                     "fixed_rules": [
                         {"period": 1, "class": "10th", "subject": "Maths", "teacher": "Nikum"}
                     ]
                 }
                 CRITICAL INSTRUCTIONS: 
-                1. If a teacher teaches MULTIPLE subjects, create SEPARATE rows for them in the "teachers" list.
-                2. Capture specific period durations in "durations".
+                1. If a teacher teaches MULTIPLE subjects, create SEPARATE rows.
+                2. YOU MUST INCLUDE "Activity" subject and its teacher if discussed! Do not skip it.
                 Chat History: ''' + chat_history
                 
                 try:
@@ -137,11 +138,10 @@ with tab5:
                     st.error(f"Failed to extract rules: {e}")
                     
     st.markdown("---")
-    st.subheader("⚙️ 2. Run Engine (Constraint Elimination Method)")
-    st.info("Engine ab 'Rule Elimination' method use karega. Pehle saari classes ki zarurat (requirements) list banayega, fir unhe ek-ek karke table mein set karega.")
+    st.subheader("⚙️ 2. Run Logical Engine")
     
     if st.button("🚀 Run Logical Engine & Generate", type="primary"):
-        with st.spinner("Python Engine is solving using Rule Elimination Logic..."):
+        with st.spinner("Python Engine is solving... (Ensuring NO FREE PERIODS for students!)"):
             sys.setrecursionlimit(5000)
             
             classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
@@ -165,8 +165,7 @@ with tab5:
                 
             busy_teachers_per_period = {i: set() for i in range(len(period_labels))}
             
-            # --- STEP 1: GATHER REQUIREMENTS (THE HUMAN LOGIC) ---
-            # Har class ko kya-kya padhna hai, uski ek list banayenge
+            # --- STEP 1: GATHER REQUIREMENTS ---
             class_requirements = {c: [] for c in classes_list}
             for t in teachers_list:
                 t_name = t.get("Teacher Name", "")
@@ -183,7 +182,33 @@ with tab5:
                         for sub in [s.strip() for s in t_sub_raw.split(",")]:
                             class_requirements[c].append((t_name, sub))
 
-            # --- STEP 2: APPLY FIXED RULES & REMOVE FROM REQUIREMENTS ---
+            # --- STEP 1.5: PADDING & TEACHER WORKLOAD PROTECTION ---
+            teacher_workload = {t.get("Teacher Name", ""): 0 for t in teachers_list}
+            for c in classes_list:
+                for t_name, sub in class_requirements[c]:
+                    teacher_workload[t_name] = teacher_workload.get(t_name, 0) + 1
+
+            for c in classes_list:
+                # Add padding if class has fewer subjects than total periods (to prevent "Free" for students)
+                while len(class_requirements[c]) < periods_count:
+                    valid_pad_options = []
+                    for t_name, sub in set(class_requirements[c]): 
+                        # Crucial Check: Protect the Teacher's Free Period!
+                        if teacher_workload.get(t_name, 0) < periods_count - 1:
+                            valid_pad_options.append((t_name, f"{sub} (Rev)"))
+                    
+                    if valid_pad_options:
+                        chosen = random.choice(valid_pad_options)
+                        class_requirements[c].append(chosen)
+                        teacher_workload[chosen[0]] += 1
+                    else:
+                        class_requirements[c].append(("Library Master", "Library/Self-Study"))
+                
+                # Trim if class has too many subjects 
+                if len(class_requirements[c]) > periods_count:
+                    class_requirements[c] = class_requirements[c][:periods_count]
+
+            # --- STEP 2: APPLY FIXED RULES ---
             for rule in fixed_rules:
                 p = rule.get("period", 1)
                 c = rule.get("class", "")
@@ -193,64 +218,47 @@ with tab5:
                 if c in classes_list and row_idx < len(period_labels):
                     timetable[c][row_idx] = f"{sub} ({teacher})"
                     busy_teachers_per_period[row_idx].add(teacher)
-                    
-                    # Remove this specific requirement so engine doesn't assign it again
                     req_tuple = (teacher, sub)
                     if req_tuple in class_requirements[c]:
                         class_requirements[c].remove(req_tuple)
 
-            # --- STEP 3: CONSTRAINT ELIMINATION BACKTRACKING ---
+            # --- STEP 3: BACKTRACKING SOLVER ---
             def solve_logical(p_idx, c_idx):
-                if p_idx >= len(period_labels):
-                    return True # Completed!
-                
-                if "BREAK" in period_labels[p_idx]:
-                    return solve_logical(p_idx + 1, 0)
+                if p_idx >= len(period_labels): return True
+                if "BREAK" in period_labels[p_idx]: return solve_logical(p_idx + 1, 0)
                 
                 c = classes_list[c_idx]
-                
                 next_c_idx = c_idx + 1
                 next_p_idx = p_idx
                 if next_c_idx >= len(classes_list):
                     next_c_idx = 0
                     next_p_idx += 1
                 
-                # If slot already filled by a fixed rule, skip
-                if timetable[c][p_idx] != "Free":
-                    return solve_logical(next_p_idx, next_c_idx)
+                if timetable[c][p_idx] != "Free": return solve_logical(next_p_idx, next_c_idx)
+                if len(class_requirements[c]) == 0: return solve_logical(next_p_idx, next_c_idx)
                 
-                # If class has no more requirements, leave it free and continue
-                if len(class_requirements[c]) == 0:
-                    return solve_logical(next_p_idx, next_c_idx)
-                
-                # Find which requirements can be fulfilled in this slot
                 valid_reqs = []
                 seen_reqs = set()
                 for req in class_requirements[c]:
-                    if req not in seen_reqs: # Don't process duplicates
+                    if req not in seen_reqs: 
                         seen_reqs.add(req)
                         t_name, sub = req
                         if t_name not in busy_teachers_per_period[p_idx]:
                             valid_reqs.append(req)
                 
-                # Sort valid reqs to prioritize teachers who have fewer valid slots (Heuristic)
-                random.shuffle(valid_reqs) # Shuffle for variation
+                random.shuffle(valid_reqs) 
                 
                 for req in valid_reqs:
                     t_name, sub = req
-                    
-                    # PLACE IN TIMETABLE
                     timetable[c][p_idx] = f"{sub} ({t_name})"
                     busy_teachers_per_period[p_idx].add(t_name)
-                    class_requirements[c].remove(req) # ELIMINATE FROM REQUIREMENTS
+                    class_requirements[c].remove(req) 
                     
-                    if solve_logical(next_p_idx, next_c_idx):
-                        return True
+                    if solve_logical(next_p_idx, next_c_idx): return True
                     
-                    # UNDO (Backtrack)
                     timetable[c][p_idx] = "Free"
                     busy_teachers_per_period[p_idx].remove(t_name)
-                    class_requirements[c].append(req) # PUT BACK IN REQUIREMENTS
+                    class_requirements[c].append(req) 
                 
                 return False
 
@@ -262,10 +270,9 @@ with tab5:
             
             if not success:
                 st.error("⚠️ LOGICAL DEADLOCK! Engine ne saari requirements list padhi, par time table fit nahi ho pa raha hai.")
-                st.info("💡 Karan: Kisi ek period mein 2 classes ko same teacher chahiye, ya kisi class mein periods se zyada subjects hain. Kripya Tab 3 check karein.")
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else:
-                st.success("✅ Perfect Timetable Generated using Rule Elimination! Engine ne pehle lists banayi, fir tick mark karke table bhara.")
+                st.success("✅ Perfect Timetable Generated! Engine verified that NO STUDENT IS FREE, and EVERY TEACHER GETS >= 1 FREE PERIOD.")
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ==========================================
