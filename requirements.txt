@@ -2,3 +2,4 @@ streamlit
 pandas
 starlette==0.38.2
 groq
+ortools
