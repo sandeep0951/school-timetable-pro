@@ -148,7 +148,7 @@ with tab5:
     st.subheader("⚙️ 2. Run Hybrid Engine (Custom Python ➡️ Google OR-Tools)")
     
     if st.button("🚀 Run Hybrid Engine & Generate", type="primary"):
-        with st.spinner("Processing Hybrid Engine..."):
+        with st.spinner("Processing Hybrid Engine... (Giving Tier 1 up to 20 seconds)"):
             sys.setrecursionlimit(5000)
             
             classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
@@ -242,7 +242,7 @@ with tab5:
             # ==========================================
             # TIER 1: CUSTOM PYTHON ENGINE
             # ==========================================
-            st.info("🔄 Tier 1: Trying Custom Python Engine...")
+            st.info("🔄 Tier 1: Trying Custom Python Engine (Giving it 20 seconds)...")
             
             custom_timetable = copy.deepcopy(initial_timetable)
             custom_busy = copy.deepcopy(initial_busy_teachers)
@@ -250,9 +250,8 @@ with tab5:
             custom_start_time = time_module.time()
             
             def solve_custom(p_idx, c_idx):
-                # 3-Second Timeout for Custom Engine to prevent hanging
-                if time_module.time() - custom_start_time > 3.0: return False
-                
+                # Increased timeout to 20 seconds!
+                if time_module.time() - custom_start_time > 20.0: return False
                 if p_idx >= len(period_labels): return True
                 if "BREAK" in period_labels[p_idx]: return solve_custom(p_idx + 1, 0)
                 
@@ -271,7 +270,8 @@ with tab5:
                 for req in custom_reqs[c]:
                     if req not in seen_reqs: 
                         seen_reqs.add(req)
-                        if req[0] not in custom_busy[p_idx]:
+                        # OMNIPRESENT LIBRARY MASTER FIX
+                        if req[0] not in custom_busy[p_idx] or req[0] == "Library Master":
                             valid_reqs.append(req)
                 
                 random.shuffle(valid_reqs) 
@@ -285,7 +285,8 @@ with tab5:
                     if solve_custom(next_p_idx, next_c_idx): return True
                     
                     custom_timetable[c][p_idx] = "Free"
-                    custom_busy[p_idx].remove(t_name)
+                    if t_name != "Library Master": # Prevent set key error
+                        custom_busy[p_idx].remove(t_name)
                     custom_reqs[c].append(req) 
                 
                 return False
@@ -295,19 +296,18 @@ with tab5:
             if custom_success:
                 df = pd.DataFrame(custom_timetable)
                 df.insert(0, "Time / Period", period_labels)
-                st.success("✅ Tier 1 Success: Timetable generated using our Custom Python Engine!")
+                st.success(f"✅ Tier 1 Success: Timetable generated using Custom Python Engine! (Took {round(time_module.time() - custom_start_time, 2)} seconds)")
                 st.dataframe(df, use_container_width=True, hide_index=True)
             
             # ==========================================
             # TIER 2: GOOGLE OR-TOOLS FALLBACK
             # ==========================================
             else:
-                st.warning("⚠️ Custom Engine detected a deadlock. Falling back to Tier 2 (Google OR-Tools)...")
+                st.warning("⚠️ Custom Engine timed out after 20 seconds. Falling back to Tier 2 (Google OR-Tools)...")
                 
                 if not ORTOOLS_AVAILABLE:
                     st.error("❌ Fallback Failed: Google 'ortools' is not installed. Please add it to requirements.txt.")
                 else:
-                    # Restore original requirements state for OR-Tools
                     ortools_timetable = copy.deepcopy(initial_timetable)
                     ortools_reqs = copy.deepcopy(class_requirements)
                     
@@ -332,7 +332,9 @@ with tab5:
                     all_teachers = set()
                     for c in classes_list:
                         for t_name, sub in ortools_reqs[c]:
-                            all_teachers.add(t_name)
+                            # OMNIPRESENT LIBRARY MASTER FIX
+                            if t_name != "Library Master":
+                                all_teachers.add(t_name)
 
                     for p in valid_periods:
                         for teacher in all_teachers:
