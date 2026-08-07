@@ -1,5 +1,4 @@
-def write_perfect_activity_engine_code():
-    code = """import streamlit as st
+import streamlit as st
 import pandas as pd
 from datetime import datetime, time
 import time as time_module
@@ -80,7 +79,7 @@ with tab4:
     st.json(st.session_state.fixed_rules)
 
 # ==========================================
-# TAB 5: THE REAL PYTHON ENGINE (ACTIVITY LOGIC + TEACHER BREAKS)
+# TAB 5: THE REAL PYTHON ENGINE (NO FREE STUDENTS + TEACHER WORKLOAD TRACKER)
 # ==========================================
 with tab5:
     st.header("Timetable Generation & Conflict Resolution")
@@ -102,12 +101,16 @@ with tab5:
                     "durations": [{"Slot": "Period 1", "Duration (Mins)": 50}],
                     "classes": ["6th A", "6th B", "7th", "8th", "9th", "10th"],
                     "teachers": [
-                        {"Teacher Name": "Balram", "Subject": "Sanskrit", "Allowed Classes": "6th A, 6th B, 7th"}
+                        {"Teacher Name": "Balram", "Subject": "Sanskrit", "Allowed Classes": "6th A, 6th B, 7th"},
+                        {"Teacher Name": "Activity Master", "Subject": "Activity", "Allowed Classes": "All"}
                     ],
                     "fixed_rules": [
                         {"period": 1, "class": "10th", "subject": "Maths", "teacher": "Nikum"}
                     ]
                 }
+                CRITICAL INSTRUCTIONS: 
+                1. If a teacher teaches MULTIPLE subjects, create SEPARATE rows.
+                2. YOU MUST INCLUDE "Activity" subject and its teacher if discussed! Do not skip it.
                 Chat History: ''' + chat_history
                 
                 try:
@@ -138,7 +141,7 @@ with tab5:
     st.subheader("⚙️ 2. Run Logical Engine")
     
     if st.button("🚀 Run Logical Engine & Generate", type="primary"):
-        with st.spinner("Python Engine is solving... (Ensuring 1 Activity/Class + Guaranteed Teacher Breaks)"):
+        with st.spinner("Python Engine is solving... (Ensuring NO FREE PERIODS for students!)"):
             sys.setrecursionlimit(5000)
             
             classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
@@ -284,7 +287,7 @@ with tab5:
                 st.error("⚠️ LOGICAL DEADLOCK! Requirements cannot fit in the grid without overlaps.")
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else:
-                st.success("✅ Perfect Timetable Generated!\\n1. No Student is Free.\\n2. Every Teacher gets >= 1 Free Period.\\n3. Activity is distributed seamlessly!")
+                st.success("✅ Perfect Timetable Generated!\n1. No Student is Free.\n2. Every Teacher gets >= 1 Free Period.\n3. Activity is distributed seamlessly!")
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ==========================================
@@ -333,9 +336,3 @@ with tab6:
                     st.session_state.chat_messages.append({"role": "assistant", "content": response})
                 except Exception as e:
                     st.error(f"Error connecting to Groq API: {e}")
-"""
-    with open('Advanced_Timetable_Pro_Ultimate.txt', 'w', encoding='utf-8') as f:
-        f.write(code)
-    return "Ultimate logic saved."
-
-print(write_perfect_activity_engine_code())
