@@ -1,4 +1,5 @@
-import streamlit as st
+def write_perfect_activity_engine_code():
+    code = """import streamlit as st
 import pandas as pd
 from datetime import datetime, time
 import time as time_module
@@ -79,7 +80,7 @@ with tab4:
     st.json(st.session_state.fixed_rules)
 
 # ==========================================
-# TAB 5: THE REAL PYTHON ENGINE (NO FREE STUDENTS + TEACHER WORKLOAD TRACKER)
+# TAB 5: THE REAL PYTHON ENGINE (ACTIVITY LOGIC + TEACHER BREAKS)
 # ==========================================
 with tab5:
     st.header("Timetable Generation & Conflict Resolution")
@@ -101,16 +102,12 @@ with tab5:
                     "durations": [{"Slot": "Period 1", "Duration (Mins)": 50}],
                     "classes": ["6th A", "6th B", "7th", "8th", "9th", "10th"],
                     "teachers": [
-                        {"Teacher Name": "Balram", "Subject": "Sanskrit", "Allowed Classes": "6th A, 6th B, 7th"},
-                        {"Teacher Name": "Activity Master", "Subject": "Activity", "Allowed Classes": "All"}
+                        {"Teacher Name": "Balram", "Subject": "Sanskrit", "Allowed Classes": "6th A, 6th B, 7th"}
                     ],
                     "fixed_rules": [
                         {"period": 1, "class": "10th", "subject": "Maths", "teacher": "Nikum"}
                     ]
                 }
-                CRITICAL INSTRUCTIONS: 
-                1. If a teacher teaches MULTIPLE subjects, create SEPARATE rows.
-                2. YOU MUST INCLUDE "Activity" subject and its teacher if discussed! Do not skip it.
                 Chat History: ''' + chat_history
                 
                 try:
@@ -141,7 +138,7 @@ with tab5:
     st.subheader("⚙️ 2. Run Logical Engine")
     
     if st.button("🚀 Run Logical Engine & Generate", type="primary"):
-        with st.spinner("Python Engine is solving... (Ensuring NO FREE PERIODS for students!)"):
+        with st.spinner("Python Engine is solving... (Ensuring 1 Activity/Class + Guaranteed Teacher Breaks)"):
             sys.setrecursionlimit(5000)
             
             classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
@@ -182,19 +179,30 @@ with tab5:
                         for sub in [s.strip() for s in t_sub_raw.split(",")]:
                             class_requirements[c].append((t_name, sub))
 
-            # --- STEP 1.5: PADDING & TEACHER WORKLOAD PROTECTION ---
+            # --- STEP 1.5: FORCE ACTIVITY LOGIC & TEACHER WORKLOAD ---
+            # Rule: Every class MUST have exactly 1 Activity lecture. 
+            # Handled by a single 'Activity Master' which guarantees no simultaneous Activity classes!
+            for c in classes_list:
+                has_activity = any("activity" in sub.lower() for t, sub in class_requirements[c])
+                if not has_activity:
+                    class_requirements[c].append(("Activity Master", "Activity"))
+
             teacher_workload = {t.get("Teacher Name", ""): 0 for t in teachers_list}
+            teacher_workload["Activity Master"] = 0
+            teacher_workload["Library Master"] = 0
+            
             for c in classes_list:
                 for t_name, sub in class_requirements[c]:
                     teacher_workload[t_name] = teacher_workload.get(t_name, 0) + 1
 
+            # PADDING: Ensure students are never free, but teachers get a break
             for c in classes_list:
-                # Add padding if class has fewer subjects than total periods (to prevent "Free" for students)
                 while len(class_requirements[c]) < periods_count:
                     valid_pad_options = []
                     for t_name, sub in set(class_requirements[c]): 
-                        # Crucial Check: Protect the Teacher's Free Period!
-                        if teacher_workload.get(t_name, 0) < periods_count - 1:
+                        # CRITICAL RULE: Max Workload = periods_count - 1 
+                        # This guarantees every teacher gets AT LEAST 1 free period (break)!
+                        if t_name not in ["Library Master", "Activity Master"] and teacher_workload.get(t_name, 0) < periods_count - 1:
                             valid_pad_options.append((t_name, f"{sub} (Rev)"))
                     
                     if valid_pad_options:
@@ -202,9 +210,11 @@ with tab5:
                         class_requirements[c].append(chosen)
                         teacher_workload[chosen[0]] += 1
                     else:
+                        # Fallback if all teachers need their mandatory break
                         class_requirements[c].append(("Library Master", "Library/Self-Study"))
+                        teacher_workload["Library Master"] += 1
                 
-                # Trim if class has too many subjects 
+                # Trim if over-scheduled
                 if len(class_requirements[c]) > periods_count:
                     class_requirements[c] = class_requirements[c][:periods_count]
 
@@ -243,6 +253,7 @@ with tab5:
                     if req not in seen_reqs: 
                         seen_reqs.add(req)
                         t_name, sub = req
+                        # 0 Clash Rule: Teacher cannot be in two classes at once
                         if t_name not in busy_teachers_per_period[p_idx]:
                             valid_reqs.append(req)
                 
@@ -256,6 +267,7 @@ with tab5:
                     
                     if solve_logical(next_p_idx, next_c_idx): return True
                     
+                    # BACKTRACK
                     timetable[c][p_idx] = "Free"
                     busy_teachers_per_period[p_idx].remove(t_name)
                     class_requirements[c].append(req) 
@@ -269,10 +281,10 @@ with tab5:
             df.insert(0, "Time / Period", period_labels)
             
             if not success:
-                st.error("⚠️ LOGICAL DEADLOCK! Engine ne saari requirements list padhi, par time table fit nahi ho pa raha hai.")
+                st.error("⚠️ LOGICAL DEADLOCK! Requirements cannot fit in the grid without overlaps.")
                 st.dataframe(df, use_container_width=True, hide_index=True)
             else:
-                st.success("✅ Perfect Timetable Generated! Engine verified that NO STUDENT IS FREE, and EVERY TEACHER GETS >= 1 FREE PERIOD.")
+                st.success("✅ Perfect Timetable Generated!\\n1. No Student is Free.\\n2. Every Teacher gets >= 1 Free Period.\\n3. Activity is distributed seamlessly!")
                 st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ==========================================
@@ -321,3 +333,9 @@ with tab6:
                     st.session_state.chat_messages.append({"role": "assistant", "content": response})
                 except Exception as e:
                     st.error(f"Error connecting to Groq API: {e}")
+"""
+    with open('Advanced_Timetable_Pro_Ultimate.txt', 'w', encoding='utf-8') as f:
+        f.write(code)
+    return "Ultimate logic saved."
+
+print(write_perfect_activity_engine_code())
