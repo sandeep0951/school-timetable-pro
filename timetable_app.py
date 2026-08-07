@@ -58,7 +58,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "👨‍🏫 3. Teachers & Rules", 
     "⚙️ 4. Extra Conditions", 
     "🚀 5. Generate (Hybrid)",
-    "💬 6. AI Co-Pilot"
+    "💬 6. AI Co-Pilot (Smart Assistant)"
 ])
 
 # ==========================================
@@ -101,11 +101,12 @@ with tab5:
         else:
             with st.spinner("Translating Chat History into UI Data..."):
                 chat_history = str(st.session_state.chat_messages)
-                extraction_prompt = '''Extract ALL timetable rules, teachers, durations, and classes from the chat history into a strict JSON format. 
+                extraction_prompt = '''You are a strict data parsing tool. Read the conversation history and extract the finalized timetable data into a JSON format.
+                IGNORE the AI's conversational text. ONLY look at the actual facts agreed upon.
                 ONLY output JSON. Format MUST be exactly:
                 {
-                    "num_periods": 7,
-                    "break_at": 3,
+                    "num_periods": 8,
+                    "break_at": 4,
                     "durations": [{"Slot": "Period 1", "Duration (Mins)": 50}],
                     "classes": ["6th A", "6th B", "7th", "8th", "9th", "10th"],
                     "teachers": [
@@ -116,8 +117,8 @@ with tab5:
                     ]
                 }
                 CRITICAL INSTRUCTIONS: 
-                1. If a teacher teaches MULTIPLE subjects, create SEPARATE rows.
-                2. YOU MUST INCLUDE "Activity" subject and its teacher if discussed! Do not skip it.
+                1. If a teacher teaches MULTIPLE subjects, create SEPARATE rows for each subject in the JSON.
+                2. Evaluate words like "All" based on the classes list extracted.
                 Chat History: ''' + chat_history
                 
                 try:
@@ -148,7 +149,7 @@ with tab5:
     st.subheader("⚙️ 2. Run Hybrid Engine (Custom Python ➡️ Google OR-Tools)")
     
     if st.button("🚀 Run Hybrid Engine & Generate", type="primary"):
-        with st.spinner("Processing Hybrid Engine... (Giving Tier 1 up to 20 seconds)"):
+        with st.spinner("Analyzing requirements before running engines..."):
             sys.setrecursionlimit(5000)
             
             classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
@@ -198,6 +199,23 @@ with tab5:
                 if not has_activity:
                     class_requirements[c].append(("Activity Master", "Activity"))
 
+            # --- SANITY CHECK (PRE-VALIDATION) ---
+            teacher_global_load = {}
+            for c in classes_list:
+                for t_name, sub in class_requirements[c]:
+                    teacher_global_load[t_name] = teacher_global_load.get(t_name, 0) + 1
+            
+            sanity_failed = False
+            for t_name, load in teacher_global_load.items():
+                if t_name not in ["Library Master"] and load > periods_count:
+                    st.error(f"🛑 PHYSICAL IMPOSSIBILITY DETECTED: Teacher '{t_name}' is required in {load} classes, but there are only {periods_count} periods in the day!")
+                    st.info(f"💡 Solution: Reduce the 'Allowed Classes' for '{t_name}' in Tab 3, or increase the Total Periods in Tab 1.")
+                    sanity_failed = True
+            
+            if sanity_failed:
+                st.stop() # App yahin ruk jayegi bina deadlock error diye
+
+            # Teacher workload tracking for breaks
             teacher_workload = {t.get("Teacher Name", ""): 0 for t in teachers_list}
             teacher_workload["Activity Master"] = 0
             teacher_workload["Library Master"] = 0
@@ -250,7 +268,6 @@ with tab5:
             custom_start_time = time_module.time()
             
             def solve_custom(p_idx, c_idx):
-                # Increased timeout to 20 seconds!
                 if time_module.time() - custom_start_time > 20.0: return False
                 if p_idx >= len(period_labels): return True
                 if "BREAK" in period_labels[p_idx]: return solve_custom(p_idx + 1, 0)
@@ -270,7 +287,6 @@ with tab5:
                 for req in custom_reqs[c]:
                     if req not in seen_reqs: 
                         seen_reqs.add(req)
-                        # OMNIPRESENT LIBRARY MASTER FIX
                         if req[0] not in custom_busy[p_idx] or req[0] == "Library Master":
                             valid_reqs.append(req)
                 
@@ -285,7 +301,7 @@ with tab5:
                     if solve_custom(next_p_idx, next_c_idx): return True
                     
                     custom_timetable[c][p_idx] = "Free"
-                    if t_name != "Library Master": # Prevent set key error
+                    if t_name != "Library Master": 
                         custom_busy[p_idx].remove(t_name)
                     custom_reqs[c].append(req) 
                 
@@ -332,7 +348,6 @@ with tab5:
                     all_teachers = set()
                     for c in classes_list:
                         for t_name, sub in ortools_reqs[c]:
-                            # OMNIPRESENT LIBRARY MASTER FIX
                             if t_name != "Library Master":
                                 all_teachers.add(t_name)
 
@@ -376,23 +391,35 @@ with tab5:
                         st.success(f"✅ Tier 2 Success: Timetable generated using Google OR-Tools! (Status: {solver.StatusName(status)})")
                         st.dataframe(df, use_container_width=True, hide_index=True)
                     else:
-                        st.error("❌ ABSOLUTE DEADLOCK! Even Google OR-Tools could not solve this mathematically. You MUST relax constraints or add teachers.")
+                        st.error("❌ ABSOLUTE DEADLOCK! The remaining constraints are too tight to solve mathematically.")
 
 # ==========================================
-# TAB 6: AI Co-Pilot
+# TAB 6: AI Co-Pilot (Smart Assistant)
 # ==========================================
 with tab6:
-    st.header("💬 AI Co-Pilot (Data Collector)")
+    st.header("💬 AI Co-Pilot (Intelligent Assistant)")
     
     if "chat_messages" not in st.session_state:
         st.session_state.chat_messages = [
             {
                 "role": "system", 
-                "content": '''You are Sandeep's Data Extractor. CRITICAL RULES: 1. NEVER GENERATE A TIMETABLE. 2. Your job is to listen and say: "Maine rules note kar liye hain. Tab 5 mein 'Sync AI Rules' dabayein."'''
+                "content": '''You are an intelligent Timetable Assistant. Your job is to converse naturally with the user to gather their school data.
+                
+                YOUR PROCESS:
+                1. Read the user's input (classes, teachers, periods).
+                2. EXAMINE for logical contradictions (e.g., if a teacher is assigned to 10 classes but there are only 8 periods in a day).
+                3. If you find a contradiction, DO NOT try to fix it silently. Point it out to the user and ask how they want to resolve it (e.g., "Aapne Banshi sir ko 10 classes di hain par periods 8 hi hain. Kya hum ek naya teacher add karein?").
+                4. If the user's data is incomplete (e.g., missing total periods), ask for it.
+                5. If everything looks logically sound, summarize the data briefly and tell the user to click "Sync AI Rules" in Tab 5.
+                
+                CRITICAL RULES:
+                - Converse naturally in Hindi/English mix.
+                - DO NOT output JSON. The system will handle JSON extraction separately in Tab 5. 
+                - Act as an advisor verifying their logic BEFORE the engine runs.'''
             },
             {
                 "role": "assistant", 
-                "content": "Namaste Sandeep Sir! Main aapka AI Assistant hoon. Mujhe apne rules bataiye, main unhe extract karke aage Tabs mein bhej dunga."
+                "content": "Namaste Sandeep Sir! Main aapka Intelligent AI Assistant hoon. Aap mujhe apna timetable data (periods, classes, teachers) batayiye. Main pehle use check karunga ki koi problem toh nahi hai, fir hum use engine ko bhejenge."
             }
         ]
 
@@ -408,7 +435,7 @@ with tab6:
         if not client:
             st.error("❌ Groq API Key missing!")
         else:
-            with st.spinner("AI is understanding your rules..."):
+            with st.spinner("AI is thinking and verifying your rules..."):
                 try:
                     completion = client.chat.completions.create(
                         model="llama-3.3-70b-versatile",
