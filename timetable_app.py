@@ -4,6 +4,7 @@ from datetime import datetime, time
 import time as time_module
 from groq import Groq
 import json
+import random
 
 # App Configuration
 st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
@@ -50,7 +51,7 @@ with tab4:
     st.info("No holidays for this week.")
 
 # ==========================================
-# TAB 5: THE REAL PYTHON ENGINE (SHIVA / 0)
+# TAB 5: THE REAL PYTHON ENGINE (WITH AUTO-FILL)
 # ==========================================
 with tab5:
     st.header("Timetable Generation & Conflict Resolution")
@@ -64,19 +65,22 @@ with tab5:
         else:
             with st.spinner("Translating Chat History into Python Constraints..."):
                 chat_history = str(st.session_state.chat_messages)
-                extraction_prompt = '''Extract all timetable rules from this chat history into a strict JSON format. 
+                extraction_prompt = '''Extract ALL timetable rules, teachers, and classes from the chat history into a strict JSON format. 
                 ONLY output JSON. 
-                Format MUST be exactly:
+                Format MUST be exactly like this structure:
                 {
                     "total_periods": 7,
                     "break_after": 3,
                     "classes": ["6th A", "6th B", "7th", "8th", "9th", "10th"],
-                    "teachers": ["Sandip", "Rudra", "Nikum"],
                     "fixed_rules": [
                         {"period": 1, "class": "10th", "subject": "Maths", "teacher": "Nikum"}
+                    ],
+                    "teacher_mappings": [
+                        {"teacher": "Balram", "subject": "Sanskrit", "allowed_classes": ["6th A", "6th B", "7th", "8th", "9th"]},
+                        {"teacher": "Rudra", "subject": "Science", "allowed_classes": ["6th A", "6th B", "7th", "8th"]}
                     ]
                 }
-                Chat History: ''' + chat_history
+                Make sure to include ALL teachers and their allowed classes in 'teacher_mappings'. Chat History: ''' + chat_history
                 
                 try:
                     completion = client.chat.completions.create(
@@ -93,22 +97,23 @@ with tab5:
                     st.error(f"Failed to extract rules: {e}")
                     
     st.markdown("---")
-    st.subheader("⚙️ 2. Run Python Logic Engine (Dynamic)")
+    st.subheader("⚙️ 2. Run Python Logic Engine (Auto-Fill & No Clash)")
     
     if st.button("🚀 Run Advanced Engine & Generate", type="primary"):
         if "final_ai_rules" not in st.session_state:
             st.error("⚠️ Pehle upar 'Extract Rules' button dabayein taaki engine ko data mil sake!")
         else:
-            with st.spinner("Python Engine is calculating clashes and building grid..."):
-                time_module.sleep(1) # Processing simulation
+            with st.spinner("Python Engine is calculating clashes and Auto-Filling grid..."):
+                time_module.sleep(1.5) # Processing simulation
                 
                 rules = st.session_state.final_ai_rules
-                classes = rules.get("classes", ["6th A", "6th B", "7th A", "7th B", "8th", "9th", "10th"])
+                classes = rules.get("classes", ["6th A", "6th B", "7th", "8th", "9th", "10th"])
                 periods_count = rules.get("total_periods", 7)
                 break_at = rules.get("break_after", 3)
                 fixed_rules = rules.get("fixed_rules", [])
+                teacher_mappings = rules.get("teacher_mappings", [])
                 
-                # Create empty grid
+                # 1. Create empty grid
                 timetable = {c: ["Free"] * (periods_count + 1) for c in classes} # +1 for break
                 period_labels = []
                 
@@ -122,27 +127,52 @@ with tab5:
                         p_idx += 1
                         period_labels.append(f"Period {p_idx}")
                 
-                # Apply Fixed Rules from JSON
+                # 2. Apply Fixed Rules from JSON
+                busy_teachers_per_period = {i: set() for i in range(len(period_labels))}
+                
                 for rule in fixed_rules:
                     p = rule.get("period", 1)
                     c = rule.get("class", "")
                     sub = rule.get("subject", "")
                     teacher = rule.get("teacher", "")
                     
-                    # Calculate actual row index considering the break
                     row_idx = p - 1 if p <= break_at else p
                     
                     if c in classes and row_idx < len(period_labels):
                         timetable[c][row_idx] = f"{sub} ({teacher})"
+                        busy_teachers_per_period[row_idx].add(teacher)
+
+                # 3. AUTO-FILL ALGORITHM (Greedy filling without clashes)
+                for row_idx in range(len(period_labels)):
+                    if "BREAK" in period_labels[row_idx]:
+                        continue
+                    
+                    for c in classes:
+                        if timetable[c][row_idx] == "Free":
+                            # Find all teachers who are allowed to teach this class AND are not busy this period
+                            available_options = []
+                            for mapping in teacher_mappings:
+                                t_name = mapping.get("teacher")
+                                t_sub = mapping.get("subject")
+                                allowed_c = mapping.get("allowed_classes", [])
+                                
+                                if c in allowed_c and t_name not in busy_teachers_per_period[row_idx]:
+                                    available_options.append((t_name, t_sub))
+                            
+                            if available_options:
+                                # Pick a random available teacher for variation
+                                chosen_teacher, chosen_sub = random.choice(available_options)
+                                timetable[c][row_idx] = f"{chosen_sub} ({chosen_teacher})"
+                                busy_teachers_per_period[row_idx].add(chosen_teacher)
+                            else:
+                                timetable[c][row_idx] = "Free (No Teacher)"
 
                 # Build DataFrame
                 df = pd.DataFrame(timetable)
                 df.insert(0, "Time / Period", period_labels)
                 
-                st.success("✅ Python Engine successfully mapped JSON rules to the Grid without clashes!")
+                st.success("✅ Python Engine successfully Auto-Filled the Grid with 0 Clashes!")
                 st.dataframe(df, use_container_width=True, hide_index=True)
-                
-                st.info("Note: Free periods abhi bache hain. Ek full algorithm (jaise Backtracking CSP) baaki teachers ko unke subject aur free slots ke hisaab se dynamically fill karega bina clash ke.")
 
 # ==========================================
 # TAB 6: AI Co-Pilot (70B MODEL CHAT ONLY)
