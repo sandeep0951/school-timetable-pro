@@ -5,6 +5,7 @@ import time as time_module
 from groq import Groq
 import json
 import random
+import sys
 
 # App Configuration
 st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
@@ -78,7 +79,7 @@ with tab4:
     st.json(st.session_state.fixed_rules)
 
 # ==========================================
-# TAB 5: THE REAL PYTHON ENGINE (SMART AUTO-FILL WITH BACKTRACKING/RETRY)
+# TAB 5: THE REAL PYTHON ENGINE (TRUE BACKTRACKING CSP)
 # ==========================================
 with tab5:
     st.header("Timetable Generation & Conflict Resolution")
@@ -107,6 +108,9 @@ with tab5:
                         {"period": 1, "class": "10th", "subject": "Maths", "teacher": "Nikum"}
                     ]
                 }
+                CRITICAL INSTRUCTIONS: 
+                1. If a teacher teaches MULTIPLE subjects, create SEPARATE rows for them in the "teachers" list.
+                2. Capture specific period durations in "durations".
                 Chat History: ''' + chat_history
                 
                 try:
@@ -134,10 +138,11 @@ with tab5:
                     st.error(f"Failed to extract rules: {e}")
                     
     st.markdown("---")
-    st.subheader("⚙️ 2. Run Engine (With 500x Auto-Correction Retry)")
+    st.subheader("⚙️ 2. Run Engine (Using True CSP Backtracking)")
     
     if st.button("🚀 Run Engine & Generate", type="primary"):
-        with st.spinner("Python Engine is solving constraints using Monte Carlo method (trying hundreds of combinations)..."):
+        with st.spinner("Python Engine is solving the Timetable using proper Backtracking Algorithm..."):
+            sys.setrecursionlimit(5000) # Ensure recursion depth is high enough for backtracking
             
             classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
             teachers_list = st.session_state.teachers_df.to_dict('records')
@@ -154,97 +159,112 @@ with tab5:
                     p_idx += 1
                     period_labels.append(f"Period {p_idx}")
             
-            max_attempts = 500  # Try 500 different random combinations
-            best_timetable = None
-            best_conflicts = ["Dummy"] * 1000 
+            timetable = {c: ["Free"] * len(period_labels) for c in classes_list} 
+            for c in classes_list:
+                timetable[c][break_at] = "LUNCH / BREAK"
+                
+            busy_teachers_per_period = {i: set() for i in range(len(period_labels))}
+            subject_counts_per_class = {c: {} for c in classes_list}
+            teacher_counts_per_class = {c: set() for c in classes_list} 
             
-            for attempt in range(max_attempts):
-                timetable = {c: ["Free"] * len(period_labels) for c in classes_list} 
-                for c in classes_list:
-                    timetable[c][break_at] = "LUNCH / BREAK"
-                    
-                busy_teachers_per_period = {i: set() for i in range(len(period_labels))}
-                subject_counts_per_class = {c: {} for c in classes_list}
-                teacher_counts_per_class = {c: set() for c in classes_list} 
-                
-                conflicts = []
-                
-                # Apply Fixed Rules first
-                for rule in fixed_rules:
-                    p = rule.get("period", 1)
-                    c = rule.get("class", "")
-                    sub = rule.get("subject", "")
-                    teacher = rule.get("teacher", "")
-                    row_idx = p - 1 if p <= break_at else p
-                    if c in classes_list and row_idx < len(period_labels):
-                        if teacher not in busy_teachers_per_period[row_idx]:
-                            timetable[c][row_idx] = f"{sub} ({teacher})"
-                            busy_teachers_per_period[row_idx].add(teacher)
-                            subject_counts_per_class[c][sub] = subject_counts_per_class[c].get(sub, 0) + 1
-                            teacher_counts_per_class[c].add(teacher)
+            # Apply Fixed Rules first
+            for rule in fixed_rules:
+                p = rule.get("period", 1)
+                c = rule.get("class", "")
+                sub = rule.get("subject", "")
+                teacher = rule.get("teacher", "")
+                row_idx = p - 1 if p <= break_at else p
+                if c in classes_list and row_idx < len(period_labels):
+                    timetable[c][row_idx] = f"{sub} ({teacher})"
+                    busy_teachers_per_period[row_idx].add(teacher)
+                    subject_counts_per_class[c][sub] = subject_counts_per_class[c].get(sub, 0) + 1
+                    teacher_counts_per_class[c].add(teacher)
 
-                # Shuffle classes to avoid deterministic deadlocks
-                shuffled_classes = classes_list.copy()
+            # THE CSP BACKTRACKING SOLVER
+            def solve_timetable(p_idx, c_idx):
+                # If we have processed all periods, we are DONE!
+                if p_idx >= len(period_labels):
+                    return True
                 
-                # AUTO-FILL
-                for row_idx in range(len(period_labels)):
-                    if "BREAK" in period_labels[row_idx]:
-                        continue
-                    
-                    random.shuffle(shuffled_classes) # Randomize class filling order
-                    
-                    for c in shuffled_classes:
-                        if timetable[c][row_idx] == "Free":
-                            available_options = []
-                            for t in teachers_list:
-                                t_name = t.get("Teacher Name", "")
-                                t_sub = t.get("Subject", "")
-                                t_allowed_str = str(t.get("Allowed Classes", "")).strip()
-                                
-                                if t_allowed_str.lower() == "all" or t_allowed_str == "":
-                                    t_allowed = classes_list
-                                else:
-                                    t_allowed = [x.strip() for x in t_allowed_str.split(",")]
-                                    
-                                if (c in t_allowed and 
-                                    t_name not in busy_teachers_per_period[row_idx] and 
-                                    subject_counts_per_class[c].get(t_sub, 0) < 1 and
-                                    t_name not in teacher_counts_per_class[c]):
-                                    
-                                    available_options.append((t_name, t_sub))
-                            
-                            if available_options:
-                                chosen_teacher, chosen_sub = random.choice(available_options)
-                                timetable[c][row_idx] = f"{chosen_sub} ({chosen_teacher})"
-                                busy_teachers_per_period[row_idx].add(chosen_teacher)
-                                subject_counts_per_class[c][chosen_sub] = subject_counts_per_class[c].get(chosen_sub, 0) + 1
-                                teacher_counts_per_class[c].add(chosen_teacher)
-                            else:
-                                timetable[c][row_idx] = "❌ Clash"
-                                conflicts.append(f"Class '{c}', Period {period_labels[row_idx]}: Deadlock occurred.")
-
-                # If perfect table found, break loop
-                if not conflicts:
-                    best_timetable = timetable
-                    best_conflicts = []
-                    break
+                # Skip break periods
+                if "BREAK" in period_labels[p_idx]:
+                    return solve_timetable(p_idx + 1, 0)
                 
-                # Otherwise, keep the one with the least conflicts
-                if len(conflicts) < len(best_conflicts):
-                    best_timetable = timetable
-                    best_conflicts = conflicts
+                c = classes_list[c_idx]
+                
+                # Calculate next indices
+                next_c_idx = c_idx + 1
+                next_p_idx = p_idx
+                if next_c_idx >= len(classes_list):
+                    next_c_idx = 0
+                    next_p_idx += 1
+                
+                # If already filled by a fixed rule, move to next
+                if timetable[c][p_idx] != "Free":
+                    return solve_timetable(next_p_idx, next_c_idx)
+                
+                # Find valid teachers for this slot
+                valid_options = []
+                for t in teachers_list:
+                    t_name = t.get("Teacher Name", "")
+                    t_sub_raw = str(t.get("Subject", ""))
+                    t_allowed_str = str(t.get("Allowed Classes", "")).strip()
+                    
+                    if t_allowed_str.lower() == "all" or t_allowed_str == "":
+                        t_allowed = classes_list
+                    else:
+                        t_allowed = [x.strip() for x in t_allowed_str.split(",")]
+                    
+                    # Core constraint checks:
+                    # 1. Allowed class
+                    # 2. Teacher not busy this period
+                    # 3. Teacher hasn't taught this class today
+                    if c in t_allowed and t_name not in busy_teachers_per_period[p_idx] and t_name not in teacher_counts_per_class[c]:
+                        
+                        # Handle multiple subjects in a single comma-separated string (e.g., "Maths, English")
+                        for single_sub in [s.strip() for s in t_sub_raw.split(",")]:
+                            if subject_counts_per_class[c].get(single_sub, 0) < 1:
+                                valid_options.append((t_name, single_sub))
+                
+                # Shuffle options so the timetable doesn't look identical every time
+                random.shuffle(valid_options)
+                
+                # Try each valid option
+                for t_name, t_sub in valid_options:
+                    # ASSIGN (DO)
+                    timetable[c][p_idx] = f"{t_sub} ({t_name})"
+                    busy_teachers_per_period[p_idx].add(t_name)
+                    subject_counts_per_class[c][t_sub] = subject_counts_per_class[c].get(t_sub, 0) + 1
+                    teacher_counts_per_class[c].add(t_name)
+                    
+                    # RECURSIVE CALL
+                    if solve_timetable(next_p_idx, next_c_idx):
+                        return True
+                    
+                    # BACKTRACK (UNDO) - If it failed down the line, undo this assignment and try next option
+                    timetable[c][p_idx] = "Free"
+                    busy_teachers_per_period[p_idx].remove(t_name)
+                    subject_counts_per_class[c][t_sub] -= 1
+                    teacher_counts_per_class[c].remove(t_name)
+                
+                # If no options worked, we must return False to trigger backtracking in the parent call
+                return False
 
-            # Show Results
-            df = pd.DataFrame(best_timetable)
+            # Start the solver
+            success = solve_timetable(0, 0)
+            
+            # Form DataFrame
+            df = pd.DataFrame(timetable)
             df.insert(0, "Time / Period", period_labels)
             
-            if best_conflicts:
-                st.warning(f"⚠️ Engine tried {max_attempts} combinations but couldn't resolve {len(best_conflicts)} clashes perfectly. The rules might be mathematically impossible.")
-                st.info("💡 Hint: Add more teachers or loosen the 'Allowed Classes' restrictions in Tab 3.")
+            if not success:
+                st.error("⚠️ MATHEMATICAL DEADLOCK! Engine checked ALL possible combinations but couldn't find a solution without breaking a rule.")
+                st.info("💡 Hint: Aapne teachers limit bahut tight rakhi hai. Go to Tab 3 and add more Allowed Classes or new Teachers.")
+                # Show partial table to let user see where it failed
+                st.dataframe(df, use_container_width=True, hide_index=True)
             else:
-                st.success(f"✅ Timetable Generated Successfully with 0 Clashes! (Solved on attempt {attempt + 1})")
-            
-            st.dataframe(df, use_container_width=True, hide_index=True)
+                st.success("✅ Perfect Timetable Generated! (Solved using Advanced Backtracking Algorithm - 0 Clashes)")
+                st.dataframe(df, use_container_width=True, hide_index=True)
 
 # ==========================================
 # TAB 6: AI Co-Pilot
