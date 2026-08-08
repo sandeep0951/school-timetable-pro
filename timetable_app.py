@@ -1,5 +1,4 @@
-def write_active_model_code():
-    code = """import streamlit as st
+code = """import streamlit as st
 import pandas as pd
 from datetime import datetime, time
 import time as time_module
@@ -91,12 +90,8 @@ with tab4:
 # TAB 5: UNIFIED DASHBOARD (CHAT + ENGINE)
 # ==========================================
 with tab5:
-    # Use columns to put Chat on Left, Engine on Right
     col_chat, col_engine = st.columns([4, 6], gap="large")
     
-    # ------------------------------------------
-    # LEFT COLUMN: AI CO-PILOT CHAT
-    # ------------------------------------------
     with col_chat:
         st.subheader("💬 AI Co-Pilot")
         
@@ -119,7 +114,7 @@ with tab5:
                 },
                 {
                     "role": "assistant", 
-                    "content": "Namaste Sandeep Sir! Main aapka Data Collector AI hoon. \n\n**Step 1:** Sabse pehle mujhe batayiye ki din mein **Total Periods** kitne honge aur **Lunch Break** kis period ke baad hoga? Uske baad hum engine run karenge yahi side mein."
+                    "content": "Namaste Sandeep Sir! Main aapka Data Collector AI hoon. \\n\\n**Step 1:** Sabse pehle mujhe batayiye ki din mein **Total Periods** kitne honge aur **Lunch Break** kis period ke baad hoga? Uske baad hum engine run karenge yahi side mein."
                 }
             ]
 
@@ -143,7 +138,7 @@ with tab5:
                 with st.spinner("AI is thinking..."):
                     try:
                         completion = client.chat.completions.create(
-                            model="llama-3.1-8b-instant",  # <--- OFFICIALLY ACTIVE FAST MODEL
+                            model="llama-3.1-8b-instant",  
                             messages=st.session_state.chat_messages,
                             temperature=0.3, 
                         )
@@ -158,13 +153,9 @@ with tab5:
                     except Exception as e:
                         st.error(f"Error connecting to Groq API: {e}")
 
-    # ------------------------------------------
-    # RIGHT COLUMN: GENERATION ENGINE
-    # ------------------------------------------
     with col_engine:
         st.subheader("⚙️ Action Center & Engine")
         
-        # SYNC BUTTON
         if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
             if not client:
                 st.error("Groq API Key missing!")
@@ -191,7 +182,7 @@ with tab5:
                     
                     try:
                         completion = client.chat.completions.create(
-                            model="llama-3.1-8b-instant",  # <--- OFFICIALLY ACTIVE FAST MODEL
+                            model="llama-3.1-8b-instant",  
                             messages=[{"role": "user", "content": extraction_prompt}],
                             temperature=0.1,
                             response_format={"type": "json_object"}
@@ -216,7 +207,6 @@ with tab5:
                         
         st.markdown("---")
         
-        # GENERATE BUTTON
         if st.button("🚀 2. Run Hybrid Engine & Generate", type="primary", use_container_width=True):
             with st.spinner("Analyzing requirements & Running engines..."):
                 sys.setrecursionlimit(5000)
@@ -245,7 +235,6 @@ with tab5:
                     
                 initial_busy_teachers = {i: set() for i in range(len(period_labels))}
                 
-                # --- COMMON STEP 1: GATHER REQUIREMENTS ---
                 class_requirements = {c: [] for c in classes_list}
                 for t in teachers_list:
                     t_name = t.get("Teacher Name", "")
@@ -267,7 +256,6 @@ with tab5:
                     if not has_activity:
                         class_requirements[c].append(("Activity Master", "Activity"))
 
-                # --- SANITY CHECK (PRE-VALIDATION) ---
                 teacher_global_load = {}
                 for c in classes_list:
                     for t_name, sub in class_requirements[c]:
@@ -276,7 +264,7 @@ with tab5:
                 sanity_failed = False
                 for t_name, load in teacher_global_load.items():
                     if t_name not in ["Library Master"] and load > periods_count:
-                        st.error(f"🛑 PHYSICAL IMPOSSIBILITY DETECTED:\nTeacher **'{t_name}'** is required in **{load} classes**, but there are only **{periods_count} periods** in the day!")
+                        st.error(f"🛑 PHYSICAL IMPOSSIBILITY DETECTED:\\nTeacher **'{t_name}'** is required in **{load} classes**, but there are only **{periods_count} periods** in the day!")
                         st.info(f"💡 You can type this error directly to the AI Co-Pilot on the left to ask for a solution.")
                         sanity_failed = True
                 
@@ -322,9 +310,6 @@ with tab5:
                         if req_tuple in class_requirements[c]:
                             class_requirements[c].remove(req_tuple)
 
-                # ==========================================
-                # TIER 1: CUSTOM PYTHON ENGINE
-                # ==========================================
                 st.info("🔄 Tier 1: Running Custom Python Engine (Max 20s)...")
                 
                 custom_timetable = copy.deepcopy(initial_timetable)
@@ -380,9 +365,6 @@ with tab5:
                     st.success(f"✅ Tier 1 Success: Timetable generated using Custom Python Engine! (Took {round(time_module.time() - custom_start_time, 2)} seconds)")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 
-                # ==========================================
-                # TIER 2: GOOGLE OR-TOOLS FALLBACK
-                # ==========================================
                 else:
                     st.warning("⚠️ Custom Engine timed out after 20 seconds. Falling back to Tier 2 (Google OR-Tools)...")
                     
@@ -458,10 +440,11 @@ with tab5:
                         else:
                             st.error("❌ ABSOLUTE DEADLOCK! The remaining constraints are too tight to solve mathematically.")
                             st.info("💡 Pucho AI se (left side): 'Bhai deadlock aa raha hai, kaise theek karun?'")
-
 """
-    with open('Advanced_Timetable_Pro_WorkingModel.txt', 'w', encoding='utf-8') as f:
-        f.write(code)
-    return "Model updated to llama-3.1-8b-instant."
+    try:
+        compile(code, "test", "exec")
+        return "Syntax OK"
+    except Exception as e:
+        return f"Syntax Error: {e}"
 
 print(write_active_model_code())
