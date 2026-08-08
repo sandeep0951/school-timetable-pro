@@ -1,5 +1,4 @@
-def write_unified_tab_code():
-    code = """import streamlit as st
+import streamlit as st
 import pandas as pd
 from datetime import datetime, time
 import time as time_module
@@ -277,7 +276,7 @@ with tab5:
                 for t_name, load in teacher_global_load.items():
                     if t_name not in ["Library Master"] and load > periods_count:
                         st.error(f"🛑 PHYSICAL IMPOSSIBILITY DETECTED:\nTeacher **'{t_name}'** is required in **{load} classes**, but there are only **{periods_count} periods** in the day!")
-                        st.info(f"💡 You can type this error directly to the AI Co-Pilot on the left to ask for a solution.")
+                        st.info("💡 You can type this error directly to the AI Co-Pilot on the left to ask for a solution.")
                         sanity_failed = True
                 
                 if sanity_failed:
@@ -458,9 +457,3 @@ with tab5:
                         else:
                             st.error("❌ ABSOLUTE DEADLOCK! The remaining constraints are too tight to solve mathematically.")
                             st.info("💡 Pucho AI se (left side): 'Bhai deadlock aa raha hai, kaise theek karun?'")
-"""
-    with open('Advanced_Timetable_Pro_Unified.txt', 'w', encoding='utf-8') as f:
-        f.write(code)
-    return "Unified Tab 5 and 6 Code Saved."
-
-print(write_unified_tab_code())
