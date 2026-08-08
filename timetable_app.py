@@ -142,7 +142,7 @@ with tab5:
                 with st.spinner("AI is thinking..."):
                     try:
                         completion = client.chat.completions.create(
-                            model="mixtral-8x7b-32768",
+                            model="llama3-8b-8192",  # UPDATED TO A SUPPORTED, FAST MODEL
                             messages=st.session_state.chat_messages,
                             temperature=0.3, 
                         )
@@ -190,7 +190,7 @@ with tab5:
                     
                     try:
                         completion = client.chat.completions.create(
-                            model="mixtral-8x7b-32768",
+                            model="llama3-8b-8192",  # UPDATED TO A SUPPORTED, FAST MODEL
                             messages=[{"role": "user", "content": extraction_prompt}],
                             temperature=0.1,
                             response_format={"type": "json_object"}
@@ -276,7 +276,7 @@ with tab5:
                 for t_name, load in teacher_global_load.items():
                     if t_name not in ["Library Master"] and load > periods_count:
                         st.error(f"🛑 PHYSICAL IMPOSSIBILITY DETECTED:\nTeacher **'{t_name}'** is required in **{load} classes**, but there are only **{periods_count} periods** in the day!")
-                        st.info("💡 You can type this error directly to the AI Co-Pilot on the left to ask for a solution.")
+                        st.info(f"💡 You can type this error directly to the AI Co-Pilot on the left to ask for a solution.")
                         sanity_failed = True
                 
                 if sanity_failed:
