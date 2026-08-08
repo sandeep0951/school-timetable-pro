@@ -51,7 +51,7 @@ if "teachers_df" not in st.session_state:
 if "fixed_rules" not in st.session_state: 
     st.session_state.fixed_rules = []
 
-# --- TAB LAYOUT (REDUCED TO 5 TABS) ---
+# --- TAB LAYOUT ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🕒 1. Timings", 
     "🏫 2. Classes", 
@@ -67,7 +67,6 @@ with tab1:
     st.header("School Timings & Periods Configuration")
     col1, col2 = st.columns(2)
     with col1:
-        # [BUG FIX: SAFE CLAMPING] Make sure values never exceed limits
         safe_periods = int(max(1, min(20, st.session_state.num_periods)))
         st.session_state.num_periods = st.number_input("Total Number of Periods", min_value=1, max_value=20, value=safe_periods)
         
@@ -113,15 +112,14 @@ with tab5:
                 {
                     "role": "system", 
                     "content": (
-                        "You are Sandeep's Timetable Data Validator.\n"
-                        "NEVER GENERATE TIMETABLES. Just validate data.\n"
-                        "PROCESS: Ensure Total Periods, Break, Classes, Teachers, and Rules exist. "
-                        "Reject if a teacher takes more classes than Total Periods. Be concise in mix of Hindi/English."
+                        "You are a strict Timetable Data Validator. NEVER GENERATE TIMETABLES.\n"
+                        "Check if periods, break, classes, teachers exist. Reject if teacher classes > total periods.\n"
+                        "Be extremely concise in Hindi/English. If perfect say: 'Data perfect hai, Sync dabayein'."
                     )
                 },
                 {
                     "role": "assistant", 
-                    "content": "Namaste Sandeep Sir! Apna timetable ka data (Classes, Teachers, Periods, Rules) daaliye. Main check karunga."
+                    "content": "Namaste! Apna timetable data daaliye, main check karunga."
                 }
             ]
 
@@ -144,17 +142,18 @@ with tab5:
             else:
                 with st.spinner("AI is thinking..."):
                     try:
-                        # [SMART BALANCED MEMORY FOR CHAT]
+                        # [SMART MEMORY: Only system prompt + last 2 messages]
                         messages_to_send = [st.session_state.chat_messages[0]]
-                        if len(st.session_state.chat_messages) > 5:
-                            messages_to_send.extend(st.session_state.chat_messages[-4:])
+                        if len(st.session_state.chat_messages) > 3:
+                            messages_to_send.extend(st.session_state.chat_messages[-2:])
                         else:
                             messages_to_send.extend(st.session_state.chat_messages[1:])
                             
                         completion = client.chat.completions.create(
                             model="llama-3.1-8b-instant",  
                             messages=messages_to_send,
-                            temperature=0.3, 
+                            temperature=0.3,
+                            max_tokens=400 # <--- THE MAGIC BULLET FOR 413 ERRORS
                         )
                         
                         response = completion.choices[0].message.content
@@ -182,14 +181,13 @@ with tab5:
                 with st.spinner("Translating Chat History into UI Data..."):
                     clean_history = []
                     for msg in st.session_state.chat_messages:
-                        if msg["role"] != "system":
-                            clean_history.append(f"{msg['role'].capitalize()}: {msg['content']}")
+                        if msg["role"] == "user":
+                            clean_history.append(f"User: {msg['content']}")
                     
-                    chat_history = "\n".join(clean_history[-6:])
+                    chat_history = "\n".join(clean_history[-3:])
 
                     extraction_prompt = (
-                        "Extract timetable data to JSON strictly based on the provided conversation.\n"
-                        'Format EXACTLY like this:\n'
+                        "Extract timetable data to JSON strictly.\n"
                         '{"num_periods":8,"break_at":4,"durations":[{"Slot":"Period 1","Duration (Mins)":50}],"classes":["6th A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"6th A"}],"fixed_rules":[]}\n\n'
                         "Data:\n" + chat_history
                     )
@@ -199,11 +197,11 @@ with tab5:
                             model="llama-3.1-8b-instant",  
                             messages=[{"role": "user", "content": extraction_prompt}],
                             temperature=0.1,
-                            response_format={"type": "json_object"}
+                            response_format={"type": "json_object"},
+                            max_tokens=1000 # <--- PREVENTS HUGE RESERVATION OF TOKENS
                         )
                         extracted_data = json.loads(completion.choices[0].message.content)
                         
-                        # [BUG FIX: SAFE CLAMPING FOR JSON PARSING]
                         raw_periods = extracted_data.get("num_periods", 7)
                         st.session_state.num_periods = int(max(1, min(20, raw_periods)))
                         
