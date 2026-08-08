@@ -106,20 +106,15 @@ with tab5:
                 {
                     "role": "system", 
                     "content": (
-                        "You are Sandeep's highly intelligent Timetable Data Validator.\n"
-                        "CRITICAL RULE: NEVER GENERATE THE TIMETABLE YOURSELF. NEVER draw a grid. Your ONLY job is to collect, validate, and prepare data for the Python Engine.\n\n"
-                        "YOUR PROCESS:\n"
-                        "1. SMART EXTRACTION: When the user provides a prompt, silently extract everything (Total Periods, Lunch Break, Classes, Teachers, Rules).\n"
-                        "2. CHECK MISSING DATA: Only ask the user for data they FORGOT to provide.\n"
-                        "3. MATHEMATICAL VALIDATION: Check for contradictions. The biggest contradiction is if a single teacher is assigned to MORE classes than the 'Total Periods' in a day.\n"
-                        "4. RESOLVE CONFLICTS: If there is a contradiction, explain it clearly to the user and ask how to fix it.\n"
-                        "5. FINAL APPROVAL: ONLY when all data is present and mathematically perfect, give the green light by saying: 'Sandeep sir, Data ekdum perfect aur conflict-free hai! Kripya daayen (right) taraf Sync AI Rules dabayein aur Engine Run karein.'\n\n"
-                        "Always speak naturally in a mix of Hindi and English. Be helpful and smart."
+                        "You are Sandeep's Timetable Data Validator.\n"
+                        "NEVER GENERATE TIMETABLES. Just validate data.\n"
+                        "PROCESS: Ensure Total Periods, Break, Classes, Teachers, and Rules exist. "
+                        "Reject if a teacher takes more classes than Total Periods. Be concise in mix of Hindi/English."
                     )
                 },
                 {
                     "role": "assistant", 
-                    "content": "Namaste Sandeep Sir! Main aapka Smart Data Validator AI hoon. \n\nAap apna poora timetable ka data (Classes, Teachers, Periods, Rules) ek hi message mein de sakte hain. Main usme se data extract karke check karunga ki kahin koi contradiction ya error toh nahi hai!"
+                    "content": "Namaste Sandeep Sir! Apna timetable ka data (Classes, Teachers, Periods, Rules) daaliye. Main check karunga."
                 }
             ]
 
@@ -142,9 +137,17 @@ with tab5:
             else:
                 with st.spinner("AI is thinking..."):
                     try:
+                        # [SMART BALANCED MEMORY FOR CHAT]
+                        # System prompt + Aakhiri 4 messages yaad rakhega (Context zinda rahega, Limit cross nahi hogi)
+                        messages_to_send = [st.session_state.chat_messages[0]]
+                        if len(st.session_state.chat_messages) > 5:
+                            messages_to_send.extend(st.session_state.chat_messages[-4:])
+                        else:
+                            messages_to_send.extend(st.session_state.chat_messages[1:])
+                            
                         completion = client.chat.completions.create(
                             model="llama-3.1-8b-instant",  
-                            messages=st.session_state.chat_messages,
+                            messages=messages_to_send,
                             temperature=0.3, 
                         )
                         
@@ -168,21 +171,20 @@ with tab5:
                 st.warning("⚠️ Pehle AI se kuch rules discuss karein (Left side mein)!")
             else:
                 with st.spinner("Translating Chat History into UI Data..."):
-                    # [ULTIMATE TOKEN SAVER]
-                    # ONLY send the USER'S messages. Ignore the AI's replies completely!
+                    # [SMART BALANCED MEMORY FOR SYNC]
                     clean_history = []
                     for msg in st.session_state.chat_messages:
-                        if msg["role"] == "user":
-                            clean_history.append(f"User Data: {msg['content']}")
+                        if msg["role"] != "system":
+                            clean_history.append(f"{msg['role'].capitalize()}: {msg['content']}")
                     
-                    # Limit to last 5 user messages to keep payload extremely tiny
-                    chat_history = "\n".join(clean_history[-5:])
+                    # Aakhiri 6 messages (User aur AI dono) bheje jayenge taaki extract karte waqt context mile
+                    chat_history = "\n".join(clean_history[-6:])
 
-                    # Minimized JSON prompt
                     extraction_prompt = (
-                        "Extract timetable data into JSON. ONLY output JSON.\n"
-                        '{"num_periods":8,"break_at":4,"durations":[{"Slot":"Period 1","Duration (Mins)":50}],"classes":["6th A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"6th A, 6th B"}],"fixed_rules":[{"period":1,"class":"8th","subject":"Maths","teacher":"Nikum"}]}\n'
-                        "Chat Data:\n" + chat_history
+                        "Extract timetable data to JSON strictly based on the provided conversation.\n"
+                        'Format EXACTLY like this:\n'
+                        '{"num_periods":8,"break_at":4,"durations":[{"Slot":"Period 1","Duration (Mins)":50}],"classes":["6th A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"6th A"}],"fixed_rules":[]}\n\n'
+                        "Data:\n" + chat_history
                     )
                     
                     try:
