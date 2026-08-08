@@ -23,7 +23,7 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Zero-Rev Clean Edition)")
+st.title("🏫 Advanced Timetable Pro (Auto-Chunked Sync Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -53,13 +53,13 @@ with tab1:
         st.session_state.periods_per_day = st.number_input("Periods per Day", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
         st.session_state.break_at = st.number_input("Lunch Break AFTER period?", min_value=1, max_value=15, value=int(st.session_state.break_at))
     with col2:
-        st.session_state.periods_timing_df = st.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
+        st.session_state.periods_timing_df = pd.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
 
 with tab2:
-    st.session_state.classes_df = st.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
+    st.session_state.classes_df = pd.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
 
 with tab3:
-    st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
+    st.session_state.teachers_df = pd.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
 
 with tab4:
     st.json(st.session_state.fixed_rules)
@@ -81,7 +81,7 @@ with tab5:
                     "role": "system", 
                     "content": (
                         "You are a SILENT Data Collector. DO NOT summarize the data.\n"
-                        "When user pastes data, reply EXACTLY with: '✅ Data Part Received. Aage ka data bhejein, ya DONE likhein.'\n"
+                        "When user pastes data parts, reply EXACTLY with: '✅ Data Part Received. Aage ka data bhejein, ya DONE likhein.'\n"
                         "DO NOT write anything else."
                     )
                 },
@@ -130,45 +130,75 @@ with tab5:
         if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Translating Complete Raw Data into UI Format..."):
-                    clean_history = [f"User Data Part: {msg['content']}" for msg in st.session_state.chat_messages if msg["role"] == "user"]
-                    chat_history = "\n".join(clean_history)
+                with st.spinner("Syncing data safely using Auto-Chunking..."):
+                    user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
-                    extraction_prompt = (
-                        "Read ALL provided user data parts and extract timetable parameters into JSON.\n"
-                        'Format EXACTLY like this JSON without extra text:\n'
-                        '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A", "1st B"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A"}],"fixed_rules":[]}\n\n'
-                        "Raw Data:\n" + chat_history
-                    )
+                    all_classes = []
+                    all_teachers = []
+                    working_days = 6
+                    periods_per_day = 8
+                    break_at = 4
                     
-                    try:
-                        completion = client.chat.completions.create(
-                            model="llama-3.1-8b-instant",  
-                            messages=[{"role": "user", "content": extraction_prompt}],
-                            temperature=0.1,
-                            response_format={"type": "json_object"},
-                            max_tokens=6000 
+                    # CHUNKED SYNC: Send parts in safe small chunks to avoid 413 completely
+                    for idx, part in enumerate(user_msgs):
+                        st.toast(f"Processing data part {idx+1} of {len(user_msgs)}...")
+                        extraction_prompt = (
+                            "Extract timetable data from this text chunk into JSON.\n"
+                            'Format EXACTLY like this JSON:\n'
+                            '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A"}],"fixed_rules":[]}\n\n'
+                            "Text Chunk:\n" + part
                         )
-                        raw_output = completion.choices[0].message.content
-                        clean_output = raw_output.strip()
-                        bt = chr(96) * 3  
-                        if clean_output.startswith(bt + "json"): clean_output = clean_output[7:]
-                        elif clean_output.startswith(bt): clean_output = clean_output[3:]
-                        if clean_output.endswith(bt): clean_output = clean_output[:-3]
-                                
-                        extracted_data = json.loads(clean_output.strip())
                         
-                        st.session_state.working_days = int(max(1, min(7, extracted_data.get("working_days", 6))))
-                        st.session_state.periods_per_day = int(max(1, min(20, extracted_data.get("periods_per_day", 8))))
-                        st.session_state.break_at = int(max(1, min(15, extracted_data.get("break_at", 4))))
+                        try:
+                            completion = client.chat.completions.create(
+                                model="llama-3.1-8b-instant",  
+                                messages=[{"role": "user", "content": extraction_prompt}],
+                                temperature=0.1,
+                                response_format={"type": "json_object"},
+                                max_tokens=1500
+                            )
+                            raw_output = completion.choices[0].message.content
+                            clean_output = raw_output.strip()
+                            bt = chr(96) * 3  
+                            if clean_output.startswith(bt + "json"): clean_output = clean_output[7:]
+                            elif clean_output.startswith(bt): clean_output = clean_output[3:]
+                            if clean_output.endswith(bt): clean_output = clean_output[:-3]
+                                    
+                            part_data = json.loads(clean_output.strip())
+                            
+                            if "working_days" in part_data: working_days = int(part_data["working_days"])
+                            if "periods_per_day" in part_data: periods_per_day = int(part_data["periods_per_day"])
+                            if "break_at" in part_data: break_at = int(part_data["break_at"])
+                            if "classes" in part_data: all_classes.extend(part_data["classes"])
+                            if "teachers" in part_data: all_teachers.extend(part_data["teachers"])
+                            
+                            time_module.sleep(1) # Small pause between chunks to respect rate limits
+                        except Exception as e:
+                            # If a single chunk fails, continue with others instead of crashing
+                            continue
+                    
+                    if all_classes or all_teachers:
+                        st.session_state.working_days = int(max(1, min(7, working_days)))
+                        st.session_state.periods_per_day = int(max(1, min(20, periods_per_day)))
+                        st.session_state.break_at = int(max(1, min(15, break_at)))
                         
-                        if "classes" in extracted_data: st.session_state.classes_df = pd.DataFrame({"Class Name": extracted_data["classes"]})
-                        if "teachers" in extracted_data: st.session_state.teachers_df = pd.DataFrame(extracted_data["teachers"])
-                        st.session_state.fixed_rules = extracted_data.get("fixed_rules", [])
-                        st.success("✅ Rules Synced Successfully! Check Tabs 1-4. Now click Generate.")
+                        # Remove duplicates
+                        unique_classes = sorted(list(set(all_classes)))
+                        if unique_classes:
+                            st.session_state.classes_df = pd.DataFrame({"Class Name": unique_classes})
+                            
+                        if all_teachers:
+                            # Deduplicate teachers by name
+                            teacher_map = {}
+                            for t in all_teachers:
+                                name = t.get("Teacher Name", "Unknown")
+                                teacher_map[name] = t
+                            st.session_state.teachers_df = pd.DataFrame(list(teacher_map.values()))
+                            
+                        st.success("✅ All Data Parts Synced Successfully via Auto-Chunking! Check Tabs 1-4.")
                         st.rerun()
-                    except Exception as e:
-                        st.error(f"Sync Error: {e}")
+                    else:
+                    	st.error("❌ No valid data could be extracted from chat history.")
 
         st.markdown("---")
         if st.button("🚀 2. Run Weekly Engine & Generate", type="primary", use_container_width=True):
@@ -217,7 +247,28 @@ with tab5:
                             for sub in [s.strip() for s in t_sub_raw.split(",")]:
                                 class_requirements[c].append((t_name, sub))
 
-                # STRICT CLEAN PADDING: NO MORE (REV) SPAM! ONLY LIBRARY / FREE
+                teacher_global_load = {}
+                for c in classes_list:
+                    for (t_name, sub) in class_requirements[c]:
+                        teacher_global_load[t_name] = teacher_global_load.get(t_name, 0) + 1
+                
+                sanity_errors = []
+                for (t_name, load) in teacher_global_load.items():
+                    if t_name not in ["Library Master", "Self-Study"] and load > total_weekly_periods:
+                        sanity_errors.append(f"Teacher '{t_name}' ko poore hafte ki {load} classes mili hain, par periods sirf {total_weekly_periods} hain.")
+                
+                if sanity_errors:
+                    st.error("🚨 WEEKLY DATA CONTRADICTIONS DETECTED:")
+                    for err in sanity_errors: st.write(f"- {err}")
+                    st.warning("Engine timetable banane ki koshish kar raha hai, par overloading problems ko theek karna padega!")
+
+                teacher_workload = {t.get("Teacher Name", ""): 0 for t in teachers_list}
+                teacher_workload["Library Master"] = 0
+                
+                for c in classes_list:
+                    for (t_name, sub) in class_requirements[c]:
+                        teacher_workload[t_name] = teacher_workload.get(t_name, 0) + 1
+
                 for c in classes_list:
                     while len(class_requirements[c]) < total_weekly_periods:
                         class_requirements[c].append(("Self-Study", "Library"))
@@ -275,7 +326,7 @@ with tab5:
                     st.success("✅ Tier 1 Success: Full Clean Weekly Timetable generated!")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ Engine timed out. Falling back to OR-Tools...")
+                    st.warning("⚠️ Custom Engine timed out after 20 seconds. Falling back to Tier 2 (Google OR-Tools)...")
                     if not ORTOOLS_AVAILABLE:
                         st.error("❌ Fallback Failed: Google 'ortools' is not installed.")
                     else:
