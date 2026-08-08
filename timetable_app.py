@@ -194,7 +194,7 @@ with tab5:
                         if msg["role"] == "user":
                             clean_history.append(f"User: {msg['content']}")
                     
-                    chat_history = "\n".join(clean_history[-2:])
+                    chat_history = "\n".join(clean_history[-5:])
 
                     extraction_prompt = (
                         "Extract the user's timetable data into JSON based on the 8 points discussed.\n"
@@ -209,9 +209,23 @@ with tab5:
                             messages=[{"role": "user", "content": extraction_prompt}],
                             temperature=0.1,
                             response_format={"type": "json_object"},
-                            max_tokens=1000 
+                            max_tokens=4000 # [THE FIX: Allowed HUGE JSON payloads]
                         )
-                        extracted_data = json.loads(completion.choices[0].message.content)
+                        
+                        raw_output = completion.choices[0].message.content
+                        
+                        # [THE FIX: Markdown Stripper to prevent JSONDecodeError]
+                        clean_output = raw_output.strip()
+                        if clean_output.startswith("```json"):
+                            clean_output = clean_output.replace("```json", "", 1)
+                            if clean_output.endswith("```"):
+                                clean_output = clean_output[:-3]
+                        elif clean_output.startswith("```"):
+                            clean_output = clean_output.replace("```", "", 1)
+                            if clean_output.endswith("```"):
+                                clean_output = clean_output[:-3]
+                                
+                        extracted_data = json.loads(clean_output.strip())
                         
                         raw_periods = extracted_data.get("num_periods", 7)
                         st.session_state.num_periods = int(max(1, min(20, raw_periods)))
@@ -229,6 +243,8 @@ with tab5:
                         st.session_state.fixed_rules = extracted_data.get("fixed_rules", [])
                         st.success("✅ Rules Synced! Check Tabs 1-4. Now click Generate.")
                         st.rerun()
+                    except json.decoder.JSONDecodeError as je:
+                        st.error(f"⚠️ JSON Parsing Error: AI ne aadha JSON bheja ya format galat kar diya. (Error: {je})\nKoshish karein thoda data kam karke ya clear karke bhejein.")
                     except Exception as e:
                         st.error(f"Failed to extract rules: {e}")
                         
