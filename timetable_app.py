@@ -51,7 +51,7 @@ if "teachers_df" not in st.session_state:
 if "fixed_rules" not in st.session_state: 
     st.session_state.fixed_rules = []
 
-# --- TAB LAYOUT (REDUCED TO 5 TABS) ---
+# --- TAB LAYOUT ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🕒 1. Timings", 
     "🏫 2. Classes", 
@@ -92,9 +92,6 @@ with tab4:
 with tab5:
     col_chat, col_engine = st.columns([4, 6], gap="large")
     
-    # ------------------------------------------
-    # LEFT COLUMN: AI CO-PILOT CHAT
-    # ------------------------------------------
     with col_chat:
         col_c1, col_c2 = st.columns([7, 3])
         with col_c1:
@@ -113,9 +110,9 @@ with tab5:
                         "CRITICAL RULE: NEVER GENERATE THE TIMETABLE YOURSELF. NEVER draw a grid. Your ONLY job is to collect, validate, and prepare data for the Python Engine.\n\n"
                         "YOUR PROCESS:\n"
                         "1. SMART EXTRACTION: When the user provides a prompt, silently extract everything (Total Periods, Lunch Break, Classes, Teachers, Rules).\n"
-                        "2. CHECK MISSING DATA: Only ask the user for data they FORGOT to provide (e.g., 'Aapne Lunch Break nahi bataya'). Do NOT ask for data they already provided.\n"
+                        "2. CHECK MISSING DATA: Only ask the user for data they FORGOT to provide.\n"
                         "3. MATHEMATICAL VALIDATION: Check for contradictions. The biggest contradiction is if a single teacher is assigned to MORE classes than the 'Total Periods' in a day.\n"
-                        "4. RESOLVE CONFLICTS: If there is a contradiction, explain it clearly to the user and ask how to fix it (e.g., 'Sandeep sir, Rakesh sir ko 10 classes mil rahi hain par periods sirf 8 hain. Kripya ise theek karein').\n"
+                        "4. RESOLVE CONFLICTS: If there is a contradiction, explain it clearly to the user and ask how to fix it.\n"
                         "5. FINAL APPROVAL: ONLY when all data is present and mathematically perfect, give the green light by saying: 'Sandeep sir, Data ekdum perfect aur conflict-free hai! Kripya daayen (right) taraf Sync AI Rules dabayein aur Engine Run karein.'\n\n"
                         "Always speak naturally in a mix of Hindi and English. Be helpful and smart."
                     )
@@ -161,9 +158,6 @@ with tab5:
                     except Exception as e:
                         st.error(f"Error connecting to Groq API: {e}")
 
-    # ------------------------------------------
-    # RIGHT COLUMN: GENERATION ENGINE
-    # ------------------------------------------
     with col_engine:
         st.subheader("⚙️ Action Center & Engine")
         
@@ -174,29 +168,21 @@ with tab5:
                 st.warning("⚠️ Pehle AI se kuch rules discuss karein (Left side mein)!")
             else:
                 with st.spinner("Translating Chat History into UI Data..."):
-                    # [SMART TOKEN SAVER] Remove JSON overhead and limit to last 15 interactions
+                    # [ULTIMATE TOKEN SAVER]
+                    # ONLY send the USER'S messages. Ignore the AI's replies completely!
                     clean_history = []
                     for msg in st.session_state.chat_messages:
-                        if msg["role"] != "system":
-                            clean_history.append(f"{msg['role'].capitalize()}: {msg['content']}")
-                    chat_history = "\n".join(clean_history[-15:])
+                        if msg["role"] == "user":
+                            clean_history.append(f"User Data: {msg['content']}")
+                    
+                    # Limit to last 5 user messages to keep payload extremely tiny
+                    chat_history = "\n".join(clean_history[-5:])
 
+                    # Minimized JSON prompt
                     extraction_prompt = (
-                        "You are a strict data parsing tool. Extract the finalized timetable data into JSON format.\n"
-                        "ONLY output JSON. Format MUST be exactly:\n"
-                        "{\n"
-                        '    "num_periods": 8,\n'
-                        '    "break_at": 4,\n'
-                        '    "durations": [{"Slot": "Period 1", "Duration (Mins)": 50}],\n'
-                        '    "classes": ["6th A", "6th B", "7th", "8th"],\n'
-                        '    "teachers": [\n'
-                        '        {"Teacher Name": "Balram", "Subject": "Sanskrit", "Allowed Classes": "6th A, 6th B"}\n'
-                        '    ],\n'
-                        '    "fixed_rules": [\n'
-                        '        {"period": 1, "class": "8th", "subject": "Maths", "teacher": "Nikum"}\n'
-                        '    ]\n'
-                        "}\n"
-                        "Chat History: \n" + chat_history
+                        "Extract timetable data into JSON. ONLY output JSON.\n"
+                        '{"num_periods":8,"break_at":4,"durations":[{"Slot":"Period 1","Duration (Mins)":50}],"classes":["6th A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"6th A, 6th B"}],"fixed_rules":[{"period":1,"class":"8th","subject":"Maths","teacher":"Nikum"}]}\n'
+                        "Chat Data:\n" + chat_history
                     )
                     
                     try:
