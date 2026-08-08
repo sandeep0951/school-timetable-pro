@@ -51,7 +51,7 @@ if "teachers_df" not in st.session_state:
 if "fixed_rules" not in st.session_state: 
     st.session_state.fixed_rules = []
 
-# --- TAB LAYOUT ---
+# --- TAB LAYOUT (REDUCED TO 5 TABS) ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🕒 1. Timings", 
     "🏫 2. Classes", 
@@ -92,29 +92,37 @@ with tab4:
 with tab5:
     col_chat, col_engine = st.columns([4, 6], gap="large")
     
+    # ------------------------------------------
+    # LEFT COLUMN: AI CO-PILOT CHAT
+    # ------------------------------------------
     with col_chat:
-        st.subheader("💬 AI Co-Pilot")
-        
+        col_c1, col_c2 = st.columns([7, 3])
+        with col_c1:
+            st.subheader("💬 AI Co-Pilot")
+        with col_c2:
+            if st.button("🗑️ Clear Chat"):
+                del st.session_state["chat_messages"]
+                st.rerun()
+
         if "chat_messages" not in st.session_state:
             st.session_state.chat_messages = [
                 {
                     "role": "system", 
                     "content": (
-                        "You are Sandeep's strict Timetable Data Collector.\n"
-                        "CRITICAL RULES:\n"
-                        "1. NEVER GENERATE THE TIMETABLE YOURSELF. NEVER draw a grid. Your ONLY job is to interview the user step-by-step and send data to the Python Engine.\n"
-                        "PROCESS:\n"
-                        "STEP 1: Ask for Total Periods and Lunch Break position.\n"
-                        "STEP 2: Ask for Classes, Teachers, and their Subjects.\n"
-                        "STEP 3: Ask for Fixed Rules.\n"
-                        "STEP 4 (Validation): Draw a quick blueprint mentally. Check if total classes assigned to any teacher exceeds total periods. If there's a contradiction, ask them to fix it immediately.\n"
-                        "Always speak in a mix of Hindi and English. Be polite but strict.\n"
-                        "Once all steps are done and data is mathematically perfect, say: 'Sandeep sir, Data ekdum perfect hai! Kripya daayen (right) taraf Sync AI Rules dabayein aur Engine Run karein.'"
+                        "You are Sandeep's highly intelligent Timetable Data Validator.\n"
+                        "CRITICAL RULE: NEVER GENERATE THE TIMETABLE YOURSELF. NEVER draw a grid. Your ONLY job is to collect, validate, and prepare data for the Python Engine.\n\n"
+                        "YOUR PROCESS:\n"
+                        "1. SMART EXTRACTION: When the user provides a prompt, silently extract everything (Total Periods, Lunch Break, Classes, Teachers, Rules).\n"
+                        "2. CHECK MISSING DATA: Only ask the user for data they FORGOT to provide (e.g., 'Aapne Lunch Break nahi bataya'). Do NOT ask for data they already provided.\n"
+                        "3. MATHEMATICAL VALIDATION: Check for contradictions. The biggest contradiction is if a single teacher is assigned to MORE classes than the 'Total Periods' in a day.\n"
+                        "4. RESOLVE CONFLICTS: If there is a contradiction, explain it clearly to the user and ask how to fix it (e.g., 'Sandeep sir, Rakesh sir ko 10 classes mil rahi hain par periods sirf 8 hain. Kripya ise theek karein').\n"
+                        "5. FINAL APPROVAL: ONLY when all data is present and mathematically perfect, give the green light by saying: 'Sandeep sir, Data ekdum perfect aur conflict-free hai! Kripya daayen (right) taraf Sync AI Rules dabayein aur Engine Run karein.'\n\n"
+                        "Always speak naturally in a mix of Hindi and English. Be helpful and smart."
                     )
                 },
                 {
                     "role": "assistant", 
-                    "content": "Namaste Sandeep Sir! Main aapka Data Collector AI hoon. \n\n**Step 1:** Sabse pehle mujhe batayiye ki din mein **Total Periods** kitne honge aur **Lunch Break** kis period ke baad hoga? Uske baad hum engine run karenge yahi side mein."
+                    "content": "Namaste Sandeep Sir! Main aapka Smart Data Validator AI hoon. \n\nAap apna poora timetable ka data (Classes, Teachers, Periods, Rules) ek hi message mein de sakte hain. Main usme se data extract karke check karunga ki kahin koi contradiction ya error toh nahi hai!"
                 }
             ]
 
@@ -153,6 +161,9 @@ with tab5:
                     except Exception as e:
                         st.error(f"Error connecting to Groq API: {e}")
 
+    # ------------------------------------------
+    # RIGHT COLUMN: GENERATION ENGINE
+    # ------------------------------------------
     with col_engine:
         st.subheader("⚙️ Action Center & Engine")
         
@@ -163,7 +174,13 @@ with tab5:
                 st.warning("⚠️ Pehle AI se kuch rules discuss karein (Left side mein)!")
             else:
                 with st.spinner("Translating Chat History into UI Data..."):
-                    chat_history = str(st.session_state.chat_messages)
+                    # [SMART TOKEN SAVER] Remove JSON overhead and limit to last 15 interactions
+                    clean_history = []
+                    for msg in st.session_state.chat_messages:
+                        if msg["role"] != "system":
+                            clean_history.append(f"{msg['role'].capitalize()}: {msg['content']}")
+                    chat_history = "\n".join(clean_history[-15:])
+
                     extraction_prompt = (
                         "You are a strict data parsing tool. Extract the finalized timetable data into JSON format.\n"
                         "ONLY output JSON. Format MUST be exactly:\n"
@@ -179,7 +196,7 @@ with tab5:
                         '        {"period": 1, "class": "8th", "subject": "Maths", "teacher": "Nikum"}\n'
                         '    ]\n'
                         "}\n"
-                        "Chat History: " + chat_history
+                        "Chat History: \n" + chat_history
                     )
                     
                     try:
@@ -266,8 +283,8 @@ with tab5:
                 sanity_failed = False
                 for t_name, load in teacher_global_load.items():
                     if t_name not in ["Library Master"] and load > periods_count:
-                        st.error(f"🛑 PHYSICAL IMPOSSIBILITY DETECTED: Teacher '{t_name}' is required in {load} classes, but there are only {periods_count} periods in the day!")
-                        st.info("💡 You can type this error directly to the AI Co-Pilot on the left to ask for a solution.")
+                        st.error(f"🛑 PHYSICAL IMPOSSIBILITY DETECTED:\nTeacher **'{t_name}'** is required in **{load} classes**, but there are only **{periods_count} periods** in the day!")
+                        st.info(f"💡 You can type this error directly to the AI Co-Pilot on the left to ask for a solution.")
                         sanity_failed = True
                 
                 if sanity_failed:
