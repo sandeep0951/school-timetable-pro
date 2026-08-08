@@ -112,14 +112,25 @@ with tab5:
                 {
                     "role": "system", 
                     "content": (
-                        "You are a strict Timetable Data Validator. NEVER GENERATE TIMETABLES.\n"
-                        "Check if periods, break, classes, teachers exist. Reject if teacher classes > total periods.\n"
-                        "Be extremely concise in Hindi/English. If perfect say: 'Data perfect hai, Sync dabayein'."
+                        "You are a strict Timetable Data Collector.\n"
+                        "Extract and summarize the user's data EXACTLY into these 8 points:\n"
+                        "1. School timing\n"
+                        "2. Total periods\n"
+                        "3. Lunch break\n"
+                        "4. Total classes plus section\n"
+                        "5. Total subjects\n"
+                        "6. Total teacher (A. Naam, B. Subject, C. Classes)\n"
+                        "7. Total other activity and curriculum\n"
+                        "8. Total rules\n\n"
+                        "PROCESS:\n"
+                        "Map the user's prompt to these 8 points mentally. Present the extracted data in these 8 numbered points clearly.\n"
+                        "If you find any CONTRADICTION (like a teacher assigned more classes than Total Periods), DO NOT stop the process. Just write the contradiction clearly at the end under a heading '⚠️ Contradictions / Problems Found'.\n"
+                        "Ask the user to fix the problems to make a correct timetable. End with: 'Agar aap data se santusht hain, toh Sync dabayein aur Engine run karein'."
                     )
                 },
                 {
                     "role": "assistant", 
-                    "content": "Namaste! Apna timetable data daaliye, main check karunga."
+                    "content": "Namaste Sandeep Sir! Main aapka naya Data Collector hoon. Kripya apna data dein. Main isko in 8 points me extract karunga aur jo bhi problems/contradictions aayengi, unhe end mein list kar dunga:\n\n1. School timing\n2. Total periods\n3. Lunch break\n4. Total classes + section\n5. Total subjects\n6. Total teacher (Naam, Subject, Classes)\n7. Other Activity\n8. Rules"
                 }
             ]
 
@@ -140,9 +151,8 @@ with tab5:
             if not client:
                 st.error("❌ Groq API Key missing!")
             else:
-                with st.spinner("AI is thinking..."):
+                with st.spinner("AI 8 points aur contradictions check kar raha hai..."):
                     try:
-                        # [SMART MEMORY: Only system prompt + last 2 messages]
                         messages_to_send = [st.session_state.chat_messages[0]]
                         if len(st.session_state.chat_messages) > 3:
                             messages_to_send.extend(st.session_state.chat_messages[-2:])
@@ -153,7 +163,7 @@ with tab5:
                             model="llama-3.1-8b-instant",  
                             messages=messages_to_send,
                             temperature=0.3,
-                            max_tokens=400 # <--- THE MAGIC BULLET FOR 413 ERRORS
+                            max_tokens=450 
                         )
                         
                         response = completion.choices[0].message.content
@@ -178,18 +188,19 @@ with tab5:
             elif "chat_messages" not in st.session_state or len(st.session_state.chat_messages) <= 2:
                 st.warning("⚠️ Pehle AI se kuch rules discuss karein (Left side mein)!")
             else:
-                with st.spinner("Translating Chat History into UI Data..."):
+                with st.spinner("Translating 8-Point Data into UI Format..."):
                     clean_history = []
                     for msg in st.session_state.chat_messages:
                         if msg["role"] == "user":
                             clean_history.append(f"User: {msg['content']}")
                     
-                    chat_history = "\n".join(clean_history[-3:])
+                    chat_history = "\n".join(clean_history[-2:])
 
                     extraction_prompt = (
-                        "Extract timetable data to JSON strictly.\n"
+                        "Extract the user's timetable data into JSON based on the 8 points discussed.\n"
+                        'Format EXACTLY like this JSON:\n'
                         '{"num_periods":8,"break_at":4,"durations":[{"Slot":"Period 1","Duration (Mins)":50}],"classes":["6th A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"6th A"}],"fixed_rules":[]}\n\n'
-                        "Data:\n" + chat_history
+                        "Data to parse:\n" + chat_history
                     )
                     
                     try:
@@ -198,7 +209,7 @@ with tab5:
                             messages=[{"role": "user", "content": extraction_prompt}],
                             temperature=0.1,
                             response_format={"type": "json_object"},
-                            max_tokens=1000 # <--- PREVENTS HUGE RESERVATION OF TOKENS
+                            max_tokens=1000 
                         )
                         extracted_data = json.loads(completion.choices[0].message.content)
                         
@@ -272,20 +283,22 @@ with tab5:
                     if not has_activity:
                         class_requirements[c].append(("Activity Master", "Activity"))
 
+                # --- SANITY CHECK (UPDATED: RECORD CONTRADICTIONS, DO NOT STOP) ---
                 teacher_global_load = {}
                 for c in classes_list:
                     for t_name, sub in class_requirements[c]:
                         teacher_global_load[t_name] = teacher_global_load.get(t_name, 0) + 1
                 
-                sanity_failed = False
+                sanity_errors = []
                 for t_name, load in teacher_global_load.items():
                     if t_name not in ["Library Master"] and load > periods_count:
-                        st.error(f"🛑 PHYSICAL IMPOSSIBILITY DETECTED:\nTeacher **'{t_name}'** is required in **{load} classes**, but there are only **{periods_count} periods** in the day!")
-                        st.info(f"💡 You can type this error directly to the AI Co-Pilot on the left to ask for a solution.")
-                        sanity_failed = True
+                        sanity_errors.append(f"Teacher '{t_name}' ko {load} classes mili hain, par school mein sirf {periods_count} periods hain.")
                 
-                if sanity_failed:
-                    st.stop()
+                if sanity_errors:
+                    st.error("🚨 DATA CONTRADICTIONS DETECTED:")
+                    for err in sanity_errors:
+                        st.write(f"- {err}")
+                    st.warning("Engine time table banane ki koshish kar raha hai, par ek sahi result ke liye upar likhi problems ko theek karna padega!")
 
                 teacher_workload = {t.get("Teacher Name", ""): 0 for t in teachers_list}
                 teacher_workload["Activity Master"] = 0
@@ -454,5 +467,8 @@ with tab5:
                             st.success(f"✅ Tier 2 Success: Timetable generated using Google OR-Tools! (Status: {solver.StatusName(status)})")
                             st.dataframe(df, use_container_width=True, hide_index=True)
                         else:
-                            st.error("❌ ABSOLUTE DEADLOCK! The remaining constraints are too tight to solve mathematically.")
-                            st.info("💡 Pucho AI se (left side): 'Bhai deadlock aa raha hai, kaise theek karun?'")
+                            st.error("❌ ABSOLUTE DEADLOCK! Engine failed.")
+                            if len(sanity_errors) > 0:
+                                st.info("💡 Bhai deadlock isliye aaya kyunki upar 'Data Contradictions' list kiye gaye hain. Unhe theek kijiye aur firse Generate dabaiye!")
+                            else:
+                                st.info("💡 Pucho AI se (left side): 'Bhai deadlock aa raha hai, kaise theek karun?'")
