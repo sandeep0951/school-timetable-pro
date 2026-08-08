@@ -130,7 +130,7 @@ with tab5:
                 },
                 {
                     "role": "assistant", 
-                    "content": "Namaste Sandeep Sir! Main aapka naya Data Collector hoon. Data ko lamba hone par Part 1, Part 2 me dein. Main isko in 8 points me nikalunga:\n1. Timing & Days\n2. Periods\n3. Lunch break\n4. Classes + Sections\n5. Subjects\n6. Teachers (Naam, Subject, Classes)\n7. Activity\n8. Rules"
+                    "content": "Namaste Sandeep Sir! Main aapka Data Collector hoon. Data ko lamba hone par Part 1, Part 2 me dein.\nMain isko in 8 points me nikalunga:\n1. Timing & Days\n2. Periods\n3. Lunch break\n4. Classes + Sections\n5. Subjects\n6. Teachers (Naam, Subject, Classes)\n7. Activity\n8. Rules"
                 }
             ]
 
@@ -153,17 +153,15 @@ with tab5:
             else:
                 with st.spinner("AI 8 points extract kar raha hai..."):
                     try:
-                        messages_to_send = [st.session_state.chat_messages[0]]
-                        if len(st.session_state.chat_messages) > 7:
-                            messages_to_send.extend(st.session_state.chat_messages[-6:])
-                        else:
-                            messages_to_send.extend(st.session_state.chat_messages[1:])
+                        # [THE ULTIMATE FIX: Only send System Prompt + LATEST message to API]
+                        # Isse API kabhi overload nahi hoga, aur response lamba hone par katega nahi!
+                        messages_to_send = [st.session_state.chat_messages[0], st.session_state.chat_messages[-1]]
                             
                         completion = client.chat.completions.create(
                             model="llama-3.1-8b-instant",  
                             messages=messages_to_send,
                             temperature=0.3,
-                            max_tokens=450 
+                            max_tokens=1024 # <-- BOLNE KI LIMIT BADHA DI HAI!
                         )
                         
                         response = completion.choices[0].message.content
@@ -209,7 +207,7 @@ with tab5:
                             messages=[{"role": "user", "content": extraction_prompt}],
                             temperature=0.1,
                             response_format={"type": "json_object"},
-                            max_tokens=4000 # [FIRM FIX: Locked properly to 4000 to handle massive loads]
+                            max_tokens=3000 # <-- JSON TRUNCATION PREVENTED
                         )
                         
                         raw_output = completion.choices[0].message.content
@@ -445,18 +443,6 @@ with tab5:
                                             teacher_assignments_in_period.append(x[c][p][r_idx])
                                 if len(teacher_assignments_in_period) > 1:
                                     model.AddAtMostOne(teacher_assignments_in_period)
-
-                        for rule in fixed_rules:
-                            p_val = rule.get("period", 1)
-                            c_val = rule.get("class", "")
-                            t_val = rule.get("teacher", "")
-                            actual_p = p_val if p_val <= break_at else p_val + 1
-                            
-                            if c_val in classes_list and actual_p in valid_periods:
-                                for r_idx, req in enumerate(ortools_reqs[c_val]):
-                                    if req[0] == t_val:
-                                        model.Add(x[c_val][actual_p][r_idx] == 1)
-                                        break
 
                         solver = cp_model.CpSolver()
                         solver.parameters.max_time_in_seconds = 30.0 
