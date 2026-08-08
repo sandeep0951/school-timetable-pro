@@ -53,13 +53,14 @@ with tab1:
         st.session_state.periods_per_day = st.number_input("Periods per Day", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
         st.session_state.break_at = st.number_input("Lunch Break AFTER period?", min_value=1, max_value=15, value=int(st.session_state.break_at))
     with col2:
-        st.session_state.periods_timing_df = pd.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
+        # [THE FIX: Changed pd.data_editor to st.data_editor]
+        st.session_state.periods_timing_df = st.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
 
 with tab2:
-    st.session_state.classes_df = pd.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
+    st.session_state.classes_df = st.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
 
 with tab3:
-    st.session_state.teachers_df = pd.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
+    st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
 
 with tab4:
     st.json(st.session_state.fixed_rules)
@@ -139,7 +140,6 @@ with tab5:
                     periods_per_day = 8
                     break_at = 4
                     
-                    # CHUNKED SYNC: Send parts in safe small chunks to avoid 413 completely
                     for idx, part in enumerate(user_msgs):
                         st.toast(f"Processing data part {idx+1} of {len(user_msgs)}...")
                         extraction_prompt = (
@@ -172,9 +172,8 @@ with tab5:
                             if "classes" in part_data: all_classes.extend(part_data["classes"])
                             if "teachers" in part_data: all_teachers.extend(part_data["teachers"])
                             
-                            time_module.sleep(1) # Small pause between chunks to respect rate limits
+                            time_module.sleep(1)
                         except Exception as e:
-                            # If a single chunk fails, continue with others instead of crashing
                             continue
                     
                     if all_classes or all_teachers:
@@ -182,13 +181,11 @@ with tab5:
                         st.session_state.periods_per_day = int(max(1, min(20, periods_per_day)))
                         st.session_state.break_at = int(max(1, min(15, break_at)))
                         
-                        # Remove duplicates
                         unique_classes = sorted(list(set(all_classes)))
                         if unique_classes:
                             st.session_state.classes_df = pd.DataFrame({"Class Name": unique_classes})
                             
                         if all_teachers:
-                            # Deduplicate teachers by name
                             teacher_map = {}
                             for t in all_teachers:
                                 name = t.get("Teacher Name", "Unknown")
@@ -198,7 +195,7 @@ with tab5:
                         st.success("✅ All Data Parts Synced Successfully via Auto-Chunking! Check Tabs 1-4.")
                         st.rerun()
                     else:
-                    	st.error("❌ No valid data could be extracted from chat history.")
+                        st.error("❌ No valid data could be extracted from chat history.")
 
         st.markdown("---")
         if st.button("🚀 2. Run Weekly Engine & Generate", type="primary", use_container_width=True):
