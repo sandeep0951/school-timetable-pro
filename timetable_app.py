@@ -214,9 +214,8 @@ with tab5:
                         
                         raw_output = completion.choices[0].message.content
                         
-                        # [THE FIX: Syntax Error Proof Markdown Stripper using Math Logic]
                         clean_output = raw_output.strip()
-                        bt = chr(96) * 3  # Creates ``` without writing it as a string literal
+                        bt = chr(96) * 3  
                         if clean_output.startswith(bt + "json"):
                             clean_output = clean_output[7:]
                         elif clean_output.startswith(bt):
@@ -276,7 +275,7 @@ with tab5:
                 
                 initial_timetable = {c: ["Free"] * len(period_labels) for c in classes_list} 
                 for c in classes_list:
-                    for idx, label in enumerate(period_labels):
+                    for (idx, label) in enumerate(period_labels):
                         if "LUNCH" in label:
                             initial_timetable[c][idx] = "LUNCH / BREAK"
                             
@@ -301,15 +300,177 @@ with tab5:
 
                 # Pad Activity Master if missing
                 for c in classes_list:
-                    has_activity = any("activity" in sub.lower() for t, sub in class_requirements[c])
+                    has_activity = any("activity" in sub.lower() for (t, sub) in class_requirements[c])
                     if not has_activity:
                         class_requirements[c].append(("Activity Master", "Activity"))
 
                 # --- NEW WEEKLY SANITY CHECK ---
                 teacher_global_load = {}
                 for c in classes_list:
-                    for t_name, sub in class_requirements[c]:
+                    for (t_name, sub) in class_requirements[c]:
                         teacher_global_load[t_name] = teacher_global_load.get(t_name, 0) + 1
                 
                 sanity_errors = []
-                for t_name,
+                for (t_name, load) in teacher_global_load.items():
+                    if t_name not in ["Library Master"] and load > total_weekly_periods:
+                        sanity_errors.append(f"Teacher '{t_name}' ko poore hafte ki {load} classes mili hain, par school week mein sirf {total_weekly_periods} periods hain.")
+                
+                if sanity_errors:
+                    st.error("🚨 WEEKLY DATA CONTRADICTIONS DETECTED:")
+                    for err in sanity_errors:
+                        st.write(f"- {err}")
+                    st.warning("Engine timetable banane ki koshish kar raha hai, par sahi result ke liye in overloading problems ko theek karna padega!")
+
+                teacher_workload = {t.get("Teacher Name", ""): 0 for t in teachers_list}
+                teacher_workload["Activity Master"] = 0
+                teacher_workload["Library Master"] = 0
+                
+                for c in classes_list:
+                    for (t_name, sub) in class_requirements[c]:
+                        teacher_workload[t_name] = teacher_workload.get(t_name, 0) + 1
+
+                # Padding requirements to fill the WEEK
+                for c in classes_list:
+                    while len(class_requirements[c]) < total_weekly_periods:
+                        valid_pad_options = []
+                        for (t_name, sub) in set(class_requirements[c]): 
+                            if t_name not in ["Library Master", "Activity Master"] and teacher_workload.get(t_name, 0) < total_weekly_periods - 1:
+                                valid_pad_options.append((t_name, f"{sub} (Rev)"))
+                        
+                        if valid_pad_options:
+                            chosen = random.choice(valid_pad_options)
+                            class_requirements[c].append(chosen)
+                            teacher_workload[chosen[0]] += 1
+                        else:
+                            class_requirements[c].append(("Library Master", "Library/Self-Study"))
+                            teacher_workload["Library Master"] += 1
+                    
+                    if len(class_requirements[c]) > total_weekly_periods:
+                        class_requirements[c] = class_requirements[c][:total_weekly_periods]
+
+                st.info(f"🔄 Tier 1: Running Custom Python Engine for {working_days} Days x {periods_per_day} Periods (Max 20s)...")
+                
+                custom_timetable = copy.deepcopy(initial_timetable)
+                custom_busy = copy.deepcopy(initial_busy_teachers)
+                custom_reqs = copy.deepcopy(class_requirements)
+                custom_start_time = time_module.time()
+                
+                def solve_custom(p_idx, c_idx):
+                    if time_module.time() - custom_start_time > 20.0: return False
+                    if p_idx >= len(period_labels): return True
+                    if "LUNCH" in period_labels[p_idx]: return solve_custom(p_idx + 1, 0)
+                    
+                    c = classes_list[c_idx]
+                    next_c_idx = c_idx + 1
+                    next_p_idx = p_idx
+                    if next_c_idx >= len(classes_list):
+                        next_c_idx = 0
+                        next_p_idx += 1
+                    
+                    if custom_timetable[c][p_idx] != "Free": return solve_custom(next_p_idx, next_c_idx)
+                    if len(custom_reqs[c]) == 0: return solve_custom(next_p_idx, next_c_idx)
+                    
+                    valid_reqs = []
+                    seen_reqs = set()
+                    for req in custom_reqs[c]:
+                        if req not in seen_reqs: 
+                            seen_reqs.add(req)
+                            if req[0] not in custom_busy[p_idx] or req[0] == "Library Master":
+                                valid_reqs.append(req)
+                    
+                    random.shuffle(valid_reqs) 
+                    
+                    for req in valid_reqs:
+                        t_name, sub = req
+                        custom_timetable[c][p_idx] = f"{sub} ({t_name})"
+                        custom_busy[p_idx].add(t_name)
+                        custom_reqs[c].remove(req) 
+                        
+                        if solve_custom(next_p_idx, next_c_idx): return True
+                        
+                        custom_timetable[c][p_idx] = "Free"
+                        if t_name != "Library Master": 
+                            custom_busy[p_idx].remove(t_name)
+                        custom_reqs[c].append(req) 
+                    
+                    return False
+
+                custom_success = solve_custom(0, 0)
+                
+                if custom_success:
+                    df = pd.DataFrame(custom_timetable)
+                    df.insert(0, "Day / Period", period_labels)
+                    st.success(f"✅ Tier 1 Success: Full Weekly Timetable generated! (Took {round(time_module.time() - custom_start_time, 2)} seconds)")
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                
+                else:
+                    st.warning("⚠️ Custom Engine timed out after 20 seconds. Falling back to Tier 2 (Google OR-Tools)...")
+                    
+                    if not ORTOOLS_AVAILABLE:
+                        st.error("❌ Fallback Failed: Google 'ortools' is not installed.")
+                    else:
+                        ortools_timetable = copy.deepcopy(initial_timetable)
+                        ortools_reqs = copy.deepcopy(class_requirements)
+                        
+                        model = cp_model.CpModel()
+                        x = {} 
+                        
+                        for c in classes_list:
+                            x[c] = {}
+                            for p in valid_periods:
+                                x[c][p] = {}
+                                for r_idx in range(len(ortools_reqs[c])):
+                                    x[c][p][r_idx] = model.NewBoolVar(f'assign_{c}_{p}_{r_idx}')
+
+                        for c in classes_list:
+                            for p in valid_periods:
+                                model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(ortools_reqs[c]))])
+
+                        for c in classes_list:
+                            for r_idx in range(len(ortools_reqs[c])):
+                                model.AddExactlyOne([x[c][p][r_idx] for p in valid_periods])
+
+                        all_teachers = set()
+                        for c in classes_list:
+                            for (t_name, sub) in ortools_reqs[c]:
+                                if t_name != "Library Master":
+                                    all_teachers.add(t_name)
+
+                        for p in valid_periods:
+                            for teacher in all_teachers:
+                                teacher_assignments_in_period = []
+                                for c in classes_list:
+                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                        if req[0] == teacher:
+                                            teacher_assignments_in_period.append(x[c][p][r_idx])
+                                if len(teacher_assignments_in_period) > 1:
+                                    model.AddAtMostOne(teacher_assignments_in_period)
+
+                        solver = cp_model.CpSolver()
+                        solver.parameters.max_time_in_seconds = 30.0 
+                        status = solver.Solve(model)
+
+                        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+                            for c in classes_list:
+                                for p in valid_periods:
+                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                        if solver.Value(x[c][p][r_idx]) == 1:
+                                            p_label_idx = -1
+                                            for (idx, label) in enumerate(period_labels):
+                                                if not "LUNCH" in label:
+                                                    p_label_idx += 1
+                                                    if p_label_idx == p - 1:
+                                                        ortools_timetable[c][idx] = f"{req[1]} ({req[0]})"
+                                                        break
+                                            
+                            df = pd.DataFrame(ortools_timetable)
+                            df.insert(0, "Day / Period", period_labels)
+                            
+                            st.success(f"✅ Tier 2 Success: Full Weekly Timetable generated via OR-Tools! (Status: {solver.StatusName(status)})")
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+                        else:
+                            st.error("❌ ABSOLUTE DEADLOCK! Engine failed.")
+                            if len(sanity_errors) > 0:
+                                st.info("💡 Bhai deadlock isliye aaya kyunki upar 'Data Contradictions' list kiye gaye hain. Unhe theek kijiye aur firse Generate dabaiye!")
+                            else:
+                                st.info("💡 Pucho AI se (left side): 'Bhai deadlock aa raha hai, kaise theek karun?'")
