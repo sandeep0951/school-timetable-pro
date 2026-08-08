@@ -23,7 +23,7 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Weekly + Rules Chunked Edition)")
+st.title("🏫 Advanced Timetable Pro (Master Memory Sync Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -85,7 +85,7 @@ with tab5:
                         "DO NOT write anything else."
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main weekly schedule, classes, teachers aur rules chup-chaap save karunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main timing, classes, teachers aur rules ko yaad rakhunga."}
             ]
 
         chat_container = st.container(height=550)
@@ -102,19 +102,16 @@ with tab5:
 
             if not client: st.error("❌ Groq API Key missing!")
             else:
-                with st.spinner("AI tukdo mein process kar raha hai (Rukega nahi)..."):
+                with st.spinner("AI tukdo mein process kar raha hai..."):
                     try:
                         chunk_size = 2500
                         prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
                         
                         final_ai_reply = ""
                         for c_idx, chunk_text in enumerate(prompt_chunks):
-                            if len(prompt_chunks) > 1:
-                                st.toast(f"⏳ Bada data hai! Chunk {c_idx+1}/{len(prompt_chunks)} bhej raha hai...")
-                            
                             messages_to_send = [
                                 st.session_state.chat_messages[0],
-                                {"role": "user", "content": f"[Chunk {c_idx+1} of {len(prompt_chunks)}]: {chunk_text}"}
+                                {"role": "user", "content": f"[Chunk {c_idx+1}]: {chunk_text}"}
                             ]
                             
                             for attempt in range(5):
@@ -125,19 +122,12 @@ with tab5:
                                         temperature=0.1,
                                         max_tokens=300
                                     )
-                                    resp_chunk = completion.choices[0].message.content
-                                    final_ai_reply += resp_chunk + " "
+                                    final_ai_reply += completion.choices[0].message.content + " "
                                     time_module.sleep(1)
                                     break
                                 except Exception as chunk_err:
-                                    err_msg = str(chunk_err).lower()
-                                    if "429" in err_msg or "rate limit" in err_msg or "413" in err_msg:
-                                        st.toast(f"⏳ Rate/Size limit! 15 sec wait kar raha hai... (Attempt {attempt+1})")
-                                        time_module.sleep(15)
-                                        continue
-                                    else:
-                                        final_ai_reply += f"[Error: {chunk_err}] "
-                                        break
+                                    time_module.sleep(10)
+                                    continue
                                         
                         with chat_container:
                             with st.chat_message("assistant"): st.markdown(final_ai_reply)
@@ -152,20 +142,21 @@ with tab5:
         if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Syncing weekly structure, classes, teachers & rules safely..."):
+                with st.spinner("Syncing data with Master Memory Accumulator..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
+                    # MASTER MEMORY STORAGE (Won't overwrite with defaults on empty chunks)
+                    master_working_days = st.session_state.working_days
+                    master_periods_per_day = st.session_state.periods_per_day
+                    master_break_at = st.session_state.break_at
                     all_classes = []
                     all_teachers = []
                     all_rules = []
-                    working_days = 6
-                    periods_per_day = 8
-                    break_at = 4
                     
                     for idx, part in enumerate(user_msgs):
-                        st.toast(f"Processing data part {idx+1} of {len(user_msgs)}...")
+                        st.toast(f"Processing part {idx+1} of {len(user_msgs)}...")
                         extraction_prompt = (
-                            "Extract timetable data from this text chunk into JSON including working_days, periods_per_day, break_at, classes, teachers, and fixed_rules.\n"
+                            "Extract timetable elements found in this chunk into JSON. If a field is not mentioned, omit it or leave it blank.\n"
                             'Format EXACTLY like this JSON:\n'
                             '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A"}],"fixed_rules":[]}\n\n'
                             "Text Chunk:\n" + part
@@ -188,40 +179,45 @@ with tab5:
                                     
                             part_data = json.loads(clean_output.strip())
                             
-                            if "working_days" in part_data: working_days = int(part_data["working_days"])
-                            if "periods_per_day" in part_data: periods_per_day = int(part_data["periods_per_day"])
-                            if "break_at" in part_data: break_at = int(part_data["break_at"])
-                            if "classes" in part_data: all_classes.extend(part_data["classes"])
-                            if "teachers" in part_data: all_teachers.extend(part_data["teachers"])
-                            if "fixed_rules" in part_data: all_rules.extend(part_data["fixed_rules"])
+                            # ACCUMULATE SAFELY WITHOUT LOSING PREVIOUS DATA
+                            if part_data.get("working_days"): 
+                                master_working_days = int(part_data["working_days"])
+                            if part_data.get("periods_per_day"): 
+                                master_periods_per_day = int(part_data["periods_per_day"])
+                            if part_data.get("break_at"): 
+                                master_break_at = int(part_data["break_at"])
+                            if part_data.get("classes"): 
+                                all_classes.extend(part_data["classes"])
+                            if part_data.get("teachers"): 
+                                all_teachers.extend(part_data["teachers"])
+                            if part_data.get("fixed_rules"): 
+                                all_rules.extend(part_data["fixed_rules"])
                             
                             time_module.sleep(1)
                         except Exception as e:
                             continue
                     
-                    if all_classes or all_teachers or all_rules:
-                        st.session_state.working_days = int(max(1, min(7, working_days)))
-                        st.session_state.periods_per_day = int(max(1, min(20, periods_per_day)))
-                        st.session_state.break_at = int(max(1, min(15, break_at)))
+                    # APPLY TO SESSION STATE SAFELY
+                    st.session_state.working_days = int(max(1, min(7, master_working_days)))
+                    st.session_state.periods_per_day = int(max(1, min(20, master_periods_per_day)))
+                    st.session_state.break_at = int(max(1, min(15, master_break_at)))
+                    
+                    unique_classes = sorted(list(set(all_classes)))
+                    if unique_classes:
+                        st.session_state.classes_df = pd.DataFrame({"Class Name": unique_classes})
                         
-                        unique_classes = sorted(list(set(all_classes)))
-                        if unique_classes:
-                            st.session_state.classes_df = pd.DataFrame({"Class Name": unique_classes})
-                            
-                        if all_teachers:
-                            teacher_map = {}
-                            for t in all_teachers:
-                                name = t.get("Teacher Name", "Unknown")
-                                teacher_map[name] = t
-                            st.session_state.teachers_df = pd.DataFrame(list(teacher_map.values()))
-                            
-                        if all_rules:
-                            st.session_state.fixed_rules = all_rules
-                            
-                        st.success("✅ All Weekly Data & Rules Synced Successfully! Check Tabs 1-4.")
-                        st.rerun()
-                    else:
-                        st.error("❌ No valid data could be extracted from chat history.")
+                    if all_teachers:
+                        teacher_map = {}
+                        for t in all_teachers:
+                            name = t.get("Teacher Name", "Unknown")
+                            teacher_map[name] = t
+                        st.session_state.teachers_df = pd.DataFrame(list(teacher_map.values()))
+                        
+                    if all_rules:
+                        st.session_state.fixed_rules = all_rules
+                        
+                    st.success("✅ All Parts & Rules Synced Successfully into Master Memory! Check Tabs 1-4.")
+                    st.rerun()
 
         st.markdown("---")
         if st.button("🚀 2. Run Weekly Engine & Generate", type="primary", use_container_width=True):
