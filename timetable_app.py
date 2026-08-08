@@ -81,7 +81,7 @@ with tab5:
                     "role": "system", 
                     "content": (
                         "You are a SILENT Data Collector. DO NOT summarize the data. DO NOT extract points in the chat.\n"
-                        "When the user pastes timetable data (classes, teachers, rules, etc.), your ONLY job is to acknowledge receipt.\n"
+                        "When the user pastes timetable data, your ONLY job is to acknowledge receipt.\n"
                         "Reply EXACTLY with: '✅ Data Part Received. Aage ka data bhejein, ya pura ho gaya ho toh DONE likhein aur Sync dabayein.'\n"
                         "DO NOT write anything else. DO NOT look for contradictions in the chat."
                     )
@@ -106,13 +106,12 @@ with tab5:
                 with st.spinner("AI Process kar raha hai..."):
                     try:
                         messages_to_send = [st.session_state.chat_messages[0]]
-                        if len(st.session_state.chat_messages) > 7:
-                            messages_to_send.extend(st.session_state.chat_messages[-6:])
+                        if len(st.session_state.chat_messages) > 5:
+                            messages_to_send.extend(st.session_state.chat_messages[-4:])
                         else:
                             messages_to_send.extend(st.session_state.chat_messages[1:])
                             
                         complete_response = ""
-                        max_retries = 3
                         retry_count = 0
                         
                         while True:
@@ -121,7 +120,7 @@ with tab5:
                                     model="llama-3.1-8b-instant",  
                                     messages=messages_to_send,
                                     temperature=0.1,
-                                    max_tokens=300 # Chat ko ab lamba bolna hi nahi hai, toh limit choti rakhi hai taaki jaldi ho
+                                    max_tokens=300
                                 )
                                 chunk = completion.choices[0].message.content
                                 complete_response += chunk
@@ -131,15 +130,18 @@ with tab5:
                                 err_str = str(api_err).lower()
                                 if "429" in err_str or "rate limit" in err_str:
                                     retry_count += 1
-                                    if retry_count > max_retries:
-                                        st.error("🚨 Rate limit baar-baar aa rahi hai. Kripya thodi der baad try karein.")
-                                        break
-                                    st.toast(f"⏳ Groq API Token Limit! 15 sec auto-wait chalu... (Attempt {retry_count}/{max_retries})")
+                                    st.toast(f"⏳ Rate Limit aayi! 15 sec wait karke automatically resume kar raha hai...")
                                     time_module.sleep(15)
                                     continue
                                 elif "413" in err_str:
-                                    st.error("🚨 Error 413: Prompt size bohot bada ho gaya hai. Kripya 'Clear Chat' karke hisso mein bhejein.")
-                                    break
+                                    # USER DEMAND: Rukega nahi, tukdo me karega
+                                    st.toast("⏳ Text bada ho gaya! AI automatically pichla hissa kaat kar aage badh raha hai bina ruke...")
+                                    if len(messages_to_send) > 2:
+                                        messages_to_send.pop(1) # Piche ka tukda udao, naya rakho
+                                    else:
+                                        # String hi aadhi kaat do
+                                        messages_to_send[-1]["content"] = messages_to_send[-1]["content"][-2000:]
+                                    continue # RUKNA NAHI HAI, WAPAS LOOP ME JAAO
                                 else:
                                     st.error(f"API Error: {api_err}")
                                     break
@@ -158,11 +160,14 @@ with tab5:
         if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Translating Complete Raw Data into UI Format..."):
-                    # [THE FIX: Ab ye saare parts uthayega, sirf aakhiri 5 nahi]
+                with st.spinner("Translating Complete Raw Data into UI Format (Auto-adjusting length)..."):
                     clean_history = [f"User Data Part: {msg['content']}" for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     chat_history = "\n".join(clean_history)
                     
+                    # Ensure prompt is strictly bounded to prevent 413
+                    if len(chat_history) > 12000:
+                        chat_history = chat_history[-12000:] # Aakhiri ke words rakhega
+                        
                     extraction_prompt = (
                         "Read ALL the provided user data parts and extract the timetable parameters accurately into JSON.\n"
                         'Format EXACTLY like this JSON without any extra text:\n'
@@ -172,14 +177,16 @@ with tab5:
                     
                     extracted_data = None
                     retry_c = 0
-                    while retry_c < 3:
+                    current_max_tokens = 2500 # Safe size
+                    
+                    while retry_c < 10: # Engine will fight up to 10 times, won't stop
                         try:
                             completion = client.chat.completions.create(
                                 model="llama-3.1-8b-instant",  
                                 messages=[{"role": "user", "content": extraction_prompt}],
                                 temperature=0.1,
                                 response_format={"type": "json_object"},
-                                max_tokens=6000 # [THE FIX: Allowed HUGE JSON payloads up to max limit]
+                                max_tokens=current_max_tokens 
                             )
                             raw_output = completion.choices[0].message.content
                             clean_output = raw_output.strip()
@@ -191,16 +198,23 @@ with tab5:
                             extracted_data = json.loads(clean_output.strip())
                             break
                         except json.decoder.JSONDecodeError as je:
-                            # Agar error aaya toh raw output print karega taaki pata chale kahan kata
-                            st.error(f"⚠️ JSON Parsing Error. (AI ne JSON ko aadha chhod diya).\nRaw Output:\n{raw_output[:500]}...")
-                            break
+                            st.error(f"⚠️ JSON Parsing Error. AI ne JSON adhura chhoda. Engine retry kar raha hai...")
+                            retry_c += 1
+                            time_module.sleep(3)
+                            continue
                         except Exception as api_err:
                             err_str = str(api_err).lower()
                             if "429" in err_str or "rate limit" in err_str:
                                 retry_c += 1
-                                st.toast(f"⏳ API Quota full. 30 seconds wait kar raha hai... ({retry_c}/3)")
-                                time_module.sleep(30)
+                                st.toast(f"⏳ API Quota full. 20 seconds wait kar raha hai... ({retry_c}/10)")
+                                time_module.sleep(20)
                                 continue
+                            elif "413" in err_str:
+                                # USER DEMAND: TUKDO ME BHEJEGA, RUKEGA NAHI
+                                st.toast("⏳ Data size limit se bada ho gaya! Engine data ko chhota karke wapas retry kar raha hai...")
+                                extraction_prompt = extraction_prompt[1500:] # Start se kaat diya
+                                current_max_tokens = max(1000, current_max_tokens - 500) # Output token kam kardiye taaki prompt fit ho jaye
+                                continue # BINA ERROR DIYE WAPAS LOOP ME
                             else:
                                 st.error(f"Error: {api_err}")
                                 break
