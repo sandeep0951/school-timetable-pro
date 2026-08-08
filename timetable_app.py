@@ -23,7 +23,7 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Auto-Chunked Sync Edition)")
+st.title("🏫 Advanced Timetable Pro (Weekly + Rules Chunked Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -53,7 +53,6 @@ with tab1:
         st.session_state.periods_per_day = st.number_input("Periods per Day", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
         st.session_state.break_at = st.number_input("Lunch Break AFTER period?", min_value=1, max_value=15, value=int(st.session_state.break_at))
     with col2:
-        # [THE FIX: Changed pd.data_editor to st.data_editor]
         st.session_state.periods_timing_df = st.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
 
 with tab2:
@@ -86,7 +85,7 @@ with tab5:
                         "DO NOT write anything else."
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main chup-chaap save karunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main weekly schedule, classes, teachers aur rules chup-chaap save karunga."}
             ]
 
         chat_container = st.container(height=550)
@@ -103,24 +102,46 @@ with tab5:
 
             if not client: st.error("❌ Groq API Key missing!")
             else:
-                with st.spinner("AI Process kar raha hai..."):
+                with st.spinner("AI tukdo mein process kar raha hai (Rukega nahi)..."):
                     try:
-                        messages_to_send = [st.session_state.chat_messages[0]]
-                        if len(st.session_state.chat_messages) > 7:
-                            messages_to_send.extend(st.session_state.chat_messages[-6:])
-                        else:
-                            messages_to_send.extend(st.session_state.chat_messages[1:])
+                        chunk_size = 2500
+                        prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
+                        
+                        final_ai_reply = ""
+                        for c_idx, chunk_text in enumerate(prompt_chunks):
+                            if len(prompt_chunks) > 1:
+                                st.toast(f"⏳ Bada data hai! Chunk {c_idx+1}/{len(prompt_chunks)} bhej raha hai...")
                             
-                        completion = client.chat.completions.create(
-                            model="llama-3.1-8b-instant",  
-                            messages=messages_to_send,
-                            temperature=0.1,
-                            max_tokens=300
-                        )
-                        response = completion.choices[0].message.content
+                            messages_to_send = [
+                                st.session_state.chat_messages[0],
+                                {"role": "user", "content": f"[Chunk {c_idx+1} of {len(prompt_chunks)}]: {chunk_text}"}
+                            ]
+                            
+                            for attempt in range(5):
+                                try:
+                                    completion = client.chat.completions.create(
+                                        model="llama-3.1-8b-instant",  
+                                        messages=messages_to_send,
+                                        temperature=0.1,
+                                        max_tokens=300
+                                    )
+                                    resp_chunk = completion.choices[0].message.content
+                                    final_ai_reply += resp_chunk + " "
+                                    time_module.sleep(1)
+                                    break
+                                except Exception as chunk_err:
+                                    err_msg = str(chunk_err).lower()
+                                    if "429" in err_msg or "rate limit" in err_msg or "413" in err_msg:
+                                        st.toast(f"⏳ Rate/Size limit! 15 sec wait kar raha hai... (Attempt {attempt+1})")
+                                        time_module.sleep(15)
+                                        continue
+                                    else:
+                                        final_ai_reply += f"[Error: {chunk_err}] "
+                                        break
+                                        
                         with chat_container:
-                            with st.chat_message("assistant"): st.markdown(response)
-                        st.session_state.chat_messages.append({"role": "assistant", "content": response})
+                            with st.chat_message("assistant"): st.markdown(final_ai_reply)
+                        st.session_state.chat_messages.append({"role": "assistant", "content": final_ai_reply})
                         st.rerun()
                     except Exception as e:
                         st.error(f"System Error: {e}")
@@ -131,11 +152,12 @@ with tab5:
         if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Syncing data safely using Auto-Chunking..."):
+                with st.spinner("Syncing weekly structure, classes, teachers & rules safely..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
                     all_classes = []
                     all_teachers = []
+                    all_rules = []
                     working_days = 6
                     periods_per_day = 8
                     break_at = 4
@@ -143,7 +165,7 @@ with tab5:
                     for idx, part in enumerate(user_msgs):
                         st.toast(f"Processing data part {idx+1} of {len(user_msgs)}...")
                         extraction_prompt = (
-                            "Extract timetable data from this text chunk into JSON.\n"
+                            "Extract timetable data from this text chunk into JSON including working_days, periods_per_day, break_at, classes, teachers, and fixed_rules.\n"
                             'Format EXACTLY like this JSON:\n'
                             '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A"}],"fixed_rules":[]}\n\n'
                             "Text Chunk:\n" + part
@@ -171,12 +193,13 @@ with tab5:
                             if "break_at" in part_data: break_at = int(part_data["break_at"])
                             if "classes" in part_data: all_classes.extend(part_data["classes"])
                             if "teachers" in part_data: all_teachers.extend(part_data["teachers"])
+                            if "fixed_rules" in part_data: all_rules.extend(part_data["fixed_rules"])
                             
                             time_module.sleep(1)
                         except Exception as e:
                             continue
                     
-                    if all_classes or all_teachers:
+                    if all_classes or all_teachers or all_rules:
                         st.session_state.working_days = int(max(1, min(7, working_days)))
                         st.session_state.periods_per_day = int(max(1, min(20, periods_per_day)))
                         st.session_state.break_at = int(max(1, min(15, break_at)))
@@ -192,7 +215,10 @@ with tab5:
                                 teacher_map[name] = t
                             st.session_state.teachers_df = pd.DataFrame(list(teacher_map.values()))
                             
-                        st.success("✅ All Data Parts Synced Successfully via Auto-Chunking! Check Tabs 1-4.")
+                        if all_rules:
+                            st.session_state.fixed_rules = all_rules
+                            
+                        st.success("✅ All Weekly Data & Rules Synced Successfully! Check Tabs 1-4.")
                         st.rerun()
                     else:
                         st.error("❌ No valid data could be extracted from chat history.")
@@ -243,28 +269,6 @@ with tab5:
                         if c in classes_list:
                             for sub in [s.strip() for s in t_sub_raw.split(",")]:
                                 class_requirements[c].append((t_name, sub))
-
-                teacher_global_load = {}
-                for c in classes_list:
-                    for (t_name, sub) in class_requirements[c]:
-                        teacher_global_load[t_name] = teacher_global_load.get(t_name, 0) + 1
-                
-                sanity_errors = []
-                for (t_name, load) in teacher_global_load.items():
-                    if t_name not in ["Library Master", "Self-Study"] and load > total_weekly_periods:
-                        sanity_errors.append(f"Teacher '{t_name}' ko poore hafte ki {load} classes mili hain, par periods sirf {total_weekly_periods} hain.")
-                
-                if sanity_errors:
-                    st.error("🚨 WEEKLY DATA CONTRADICTIONS DETECTED:")
-                    for err in sanity_errors: st.write(f"- {err}")
-                    st.warning("Engine timetable banane ki koshish kar raha hai, par overloading problems ko theek karna padega!")
-
-                teacher_workload = {t.get("Teacher Name", ""): 0 for t in teachers_list}
-                teacher_workload["Library Master"] = 0
-                
-                for c in classes_list:
-                    for (t_name, sub) in class_requirements[c]:
-                        teacher_workload[t_name] = teacher_workload.get(t_name, 0) + 1
 
                 for c in classes_list:
                     while len(class_requirements[c]) < total_weekly_periods:
@@ -323,65 +327,4 @@ with tab5:
                     st.success("✅ Tier 1 Success: Full Clean Weekly Timetable generated!")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ Custom Engine timed out after 20 seconds. Falling back to Tier 2 (Google OR-Tools)...")
-                    if not ORTOOLS_AVAILABLE:
-                        st.error("❌ Fallback Failed: Google 'ortools' is not installed.")
-                    else:
-                        ortools_timetable = copy.deepcopy(initial_timetable)
-                        ortools_reqs = copy.deepcopy(class_requirements)
-                        
-                        model = cp_model.CpModel()
-                        x = {} 
-                        for c in classes_list:
-                            x[c] = {}
-                            for p in valid_periods:
-                                x[c][p] = {}
-                                for r_idx in range(len(ortools_reqs[c])):
-                                    x[c][p][r_idx] = model.NewBoolVar(f'assign_{c}_{p}_{r_idx}')
-
-                        for c in classes_list:
-                            for p in valid_periods:
-                                model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(ortools_reqs[c]))])
-
-                        for c in classes_list:
-                            for r_idx in range(len(ortools_reqs[c])):
-                                model.AddExactlyOne([x[c][p][r_idx] for p in valid_periods])
-
-                        all_teachers = set()
-                        for c in classes_list:
-                            for (t_name, sub) in ortools_reqs[c]:
-                                if t_name != "Self-Study": all_teachers.add(t_name)
-
-                        for p in valid_periods:
-                            for teacher in all_teachers:
-                                teacher_assignments_in_period = []
-                                for c in classes_list:
-                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
-                                        if req[0] == teacher:
-                                            teacher_assignments_in_period.append(x[c][p][r_idx])
-                                if len(teacher_assignments_in_period) > 1:
-                                    model.AddAtMostOne(teacher_assignments_in_period)
-
-                        solver = cp_model.CpSolver()
-                        solver.parameters.max_time_in_seconds = 30.0 
-                        status = solver.Solve(model)
-
-                        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-                            for c in classes_list:
-                                for p in valid_periods:
-                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
-                                        if solver.Value(x[c][p][r_idx]) == 1:
-                                            p_label_idx = -1
-                                            for (idx, label) in enumerate(period_labels):
-                                                if not "LUNCH" in label:
-                                                    p_label_idx += 1
-                                                    if p_label_idx == p - 1:
-                                                        ortools_timetable[c][idx] = f"{req[1]} ({req[0]})"
-                                                        break
-                                            
-                            df = pd.DataFrame(ortools_timetable)
-                            df.insert(0, "Day / Period", period_labels)
-                            st.success(f"✅ Tier 2 Success: Full Weekly Timetable generated via OR-Tools! (Status: {solver.StatusName(status)})")
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-                        else:
-                            st.error("❌ ABSOLUTE DEADLOCK! Engine failed.")
+                    st.warning("⚠️ Custom Engine timed out.")
