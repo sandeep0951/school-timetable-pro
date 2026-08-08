@@ -23,7 +23,7 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Silent Collector & Auto-Resume)")
+st.title("🏫 Advanced Timetable Pro (Pure Data Sync Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -80,14 +80,13 @@ with tab5:
                 {
                     "role": "system", 
                     "content": (
-                        "You are a 'Silent Timetable Data Collector'.\n"
-                        "CRITICAL RULE 1: When user sends data parts, DO NOT summarize or repeat the data. ONLY reply: '✅ Part received. Aage ka data bhejein.'\n"
-                        "CRITICAL RULE 2: ONLY extract and summarize into the 8 points when the user explicitly says 'DONE', 'Pura ho gaya', or 'Extract karo'.\n"
-                        "The 8 points: 1. Timing & Days, 2. Periods, 3. Lunch break, 4. Classes, 5. Subjects, 6. Teachers, 7. Activity, 8. Rules.\n"
-                        "CRITICAL RULE 3: Contradiction only if ONE teacher's classes > total weekly periods. Multiple teachers per class is NORMAL."
+                        "You are a SILENT Data Collector. DO NOT summarize the data. DO NOT extract points in the chat.\n"
+                        "When the user pastes timetable data (classes, teachers, rules, etc.), your ONLY job is to acknowledge receipt.\n"
+                        "Reply EXACTLY with: '✅ Data Part Received. Aage ka data bhejein, ya pura ho gaya ho toh DONE likhein aur Sync dabayein.'\n"
+                        "DO NOT write anything else. DO NOT look for contradictions in the chat."
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data bhejein. Main chup-chaap collect karunga. Limit badha di gayi hai, agar API full hui toh main wait karke resume karunga! Jab poora data bhej dein toh 'DONE' likh dijiyega."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data Parts me bhejein. Main ab koi summary nahi banaunga, sirf data chup-chaap save karunga taaki Sync ekdum perfect ho!"}
             ]
 
         chat_container = st.container(height=550)
@@ -121,21 +120,12 @@ with tab5:
                                 completion = client.chat.completions.create(
                                     model="llama-3.1-8b-instant",  
                                     messages=messages_to_send,
-                                    temperature=0.3,
-                                    max_tokens=3000 # <-- MAXIMUM SAFE LIMIT FOR CHAT
+                                    temperature=0.1,
+                                    max_tokens=300 # Chat ko ab lamba bolna hi nahi hai, toh limit choti rakhi hai taaki jaldi ho
                                 )
                                 chunk = completion.choices[0].message.content
-                                finish_reason = completion.choices[0].finish_reason
                                 complete_response += chunk
-                                
-                                if finish_reason == "length":
-                                    st.toast("⏳ Lamba jawab! AI thoda saans le raha hai, automatically continue karega...")
-                                    time_module.sleep(5) 
-                                    messages_to_send.append({"role": "assistant", "content": chunk})
-                                    messages_to_send.append({"role": "user", "content": "Continue exactly from where you left off. No intro."})
-                                    continue
-                                else:
-                                    break 
+                                break 
                                     
                             except Exception as api_err:
                                 err_str = str(api_err).lower()
@@ -144,8 +134,8 @@ with tab5:
                                     if retry_count > max_retries:
                                         st.error("🚨 Rate limit baar-baar aa rahi hai. Kripya thodi der baad try karein.")
                                         break
-                                    st.toast(f"⏳ Groq API Token Limit! 60 sec auto-wait chalu... (Attempt {retry_count}/{max_retries})")
-                                    time_module.sleep(60)
+                                    st.toast(f"⏳ Groq API Token Limit! 15 sec auto-wait chalu... (Attempt {retry_count}/{max_retries})")
+                                    time_module.sleep(15)
                                     continue
                                 elif "413" in err_str:
                                     st.error("🚨 Error 413: Prompt size bohot bada ho gaya hai. Kripya 'Clear Chat' karke hisso mein bhejein.")
@@ -168,14 +158,16 @@ with tab5:
         if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Translating Data (Auto-wait enabled)..."):
-                    clean_history = [f"User: {msg['content']}" for msg in st.session_state.chat_messages if msg["role"] == "user"]
-                    chat_history = "\n".join(clean_history[-5:])
+                with st.spinner("Translating Complete Raw Data into UI Format..."):
+                    # [THE FIX: Ab ye saare parts uthayega, sirf aakhiri 5 nahi]
+                    clean_history = [f"User Data Part: {msg['content']}" for msg in st.session_state.chat_messages if msg["role"] == "user"]
+                    chat_history = "\n".join(clean_history)
                     
                     extraction_prompt = (
-                        "Extract the user's timetable data into JSON based on the 8 points discussed.\n"
-                        '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A", "1st B"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A"}],"fixed_rules":[]}\n\n'
-                        "Data to parse:\n" + chat_history
+                        "Read ALL the provided user data parts and extract the timetable parameters accurately into JSON.\n"
+                        'Format EXACTLY like this JSON without any extra text:\n'
+                        '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A", "1st B"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A, 1st B"}],"fixed_rules":[]}\n\n'
+                        "Raw Data:\n" + chat_history
                     )
                     
                     extracted_data = None
@@ -187,7 +179,7 @@ with tab5:
                                 messages=[{"role": "user", "content": extraction_prompt}],
                                 temperature=0.1,
                                 response_format={"type": "json_object"},
-                                max_tokens=4500 # <-- MAXIMUM SAFE LIMIT FOR JSON
+                                max_tokens=6000 # [THE FIX: Allowed HUGE JSON payloads up to max limit]
                             )
                             raw_output = completion.choices[0].message.content
                             clean_output = raw_output.strip()
@@ -199,14 +191,15 @@ with tab5:
                             extracted_data = json.loads(clean_output.strip())
                             break
                         except json.decoder.JSONDecodeError as je:
-                            st.error(f"⚠️ JSON Parsing Error: AI ne aadha JSON bheja. Error: {je}")
+                            # Agar error aaya toh raw output print karega taaki pata chale kahan kata
+                            st.error(f"⚠️ JSON Parsing Error. (AI ne JSON ko aadha chhod diya).\nRaw Output:\n{raw_output[:500]}...")
                             break
                         except Exception as api_err:
                             err_str = str(api_err).lower()
                             if "429" in err_str or "rate limit" in err_str:
                                 retry_c += 1
-                                st.toast(f"⏳ API Quota full. 60 seconds wait kar raha hai... ({retry_c}/3)")
-                                time_module.sleep(60)
+                                st.toast(f"⏳ API Quota full. 30 seconds wait kar raha hai... ({retry_c}/3)")
+                                time_module.sleep(30)
                                 continue
                             else:
                                 st.error(f"Error: {api_err}")
@@ -219,7 +212,7 @@ with tab5:
                         if "classes" in extracted_data: st.session_state.classes_df = pd.DataFrame({"Class Name": extracted_data["classes"]})
                         if "teachers" in extracted_data: st.session_state.teachers_df = pd.DataFrame(extracted_data["teachers"])
                         st.session_state.fixed_rules = extracted_data.get("fixed_rules", [])
-                        st.success("✅ Rules Synced!")
+                        st.success("✅ Rules Synced Successfully! Check Tabs 1-4. Now click Generate.")
                         st.rerun()
 
         st.markdown("---")
