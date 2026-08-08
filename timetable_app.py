@@ -23,7 +23,7 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Weekly Engine + 8-Point AI)")
+st.title("🏫 Advanced Timetable Pro (Silent Collector & Auto-Resume)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -77,8 +77,17 @@ with tab5:
 
         if "chat_messages" not in st.session_state:
             st.session_state.chat_messages = [
-                {"role": "system", "content": "You are a strict Timetable Data Collector. Extract data into 8 points. Wait for chunks if needed. Mention contradictions at the end. Be concise."},
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data daaliye. Main isko in 8 points me extract karunga:"}
+                {
+                    "role": "system", 
+                    "content": (
+                        "You are a 'Silent Timetable Data Collector'.\n"
+                        "CRITICAL RULE 1: When user sends data parts, DO NOT summarize or repeat the data. ONLY reply: '✅ Part received. Aage ka data bhejein.'\n"
+                        "CRITICAL RULE 2: ONLY extract and summarize into the 8 points when the user explicitly says 'DONE', 'Pura ho gaya', or 'Extract karo'.\n"
+                        "The 8 points: 1. Timing & Days, 2. Periods, 3. Lunch break, 4. Classes, 5. Subjects, 6. Teachers, 7. Activity, 8. Rules.\n"
+                        "CRITICAL RULE 3: Contradiction only if ONE teacher's classes > total weekly periods. Multiple teachers per class is NORMAL."
+                    )
+                },
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data bhejein. Main chup-chaap collect karunga. Limit badha di gayi hai, agar API full hui toh main wait karke resume karunga! Jab poora data bhej dein toh 'DONE' likh dijiyega."}
             ]
 
         chat_container = st.container(height=550)
@@ -95,36 +104,55 @@ with tab5:
 
             if not client: st.error("❌ Groq API Key missing!")
             else:
-                with st.spinner("AI Soch raha hai..."):
+                with st.spinner("AI Process kar raha hai..."):
                     try:
                         messages_to_send = [st.session_state.chat_messages[0]]
-                        if len(st.session_state.chat_messages) > 3:
-                            messages_to_send.extend(st.session_state.chat_messages[-2:])
+                        if len(st.session_state.chat_messages) > 7:
+                            messages_to_send.extend(st.session_state.chat_messages[-6:])
                         else:
                             messages_to_send.extend(st.session_state.chat_messages[1:])
                             
                         complete_response = ""
-                        for step in range(5): 
+                        max_retries = 3
+                        retry_count = 0
+                        
+                        while True:
                             try:
                                 completion = client.chat.completions.create(
                                     model="llama-3.1-8b-instant",  
                                     messages=messages_to_send,
                                     temperature=0.3,
-                                    max_tokens=800
+                                    max_tokens=3000 # <-- MAXIMUM SAFE LIMIT FOR CHAT
                                 )
                                 chunk = completion.choices[0].message.content
                                 finish_reason = completion.choices[0].finish_reason
                                 complete_response += chunk
                                 
                                 if finish_reason == "length":
+                                    st.toast("⏳ Lamba jawab! AI thoda saans le raha hai, automatically continue karega...")
                                     time_module.sleep(5) 
                                     messages_to_send.append({"role": "assistant", "content": chunk})
-                                    messages_to_send.append({"role": "user", "content": "Continue."})
+                                    messages_to_send.append({"role": "user", "content": "Continue exactly from where you left off. No intro."})
+                                    continue
                                 else:
                                     break 
+                                    
                             except Exception as api_err:
-                                time_module.sleep(30)
-                                continue 
+                                err_str = str(api_err).lower()
+                                if "429" in err_str or "rate limit" in err_str:
+                                    retry_count += 1
+                                    if retry_count > max_retries:
+                                        st.error("🚨 Rate limit baar-baar aa rahi hai. Kripya thodi der baad try karein.")
+                                        break
+                                    st.toast(f"⏳ Groq API Token Limit! 60 sec auto-wait chalu... (Attempt {retry_count}/{max_retries})")
+                                    time_module.sleep(60)
+                                    continue
+                                elif "413" in err_str:
+                                    st.error("🚨 Error 413: Prompt size bohot bada ho gaya hai. Kripya 'Clear Chat' karke hisso mein bhejein.")
+                                    break
+                                else:
+                                    st.error(f"API Error: {api_err}")
+                                    break
                                     
                         if complete_response:
                             with chat_container:
@@ -140,9 +168,9 @@ with tab5:
         if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Translating Data..."):
+                with st.spinner("Translating Data (Auto-wait enabled)..."):
                     clean_history = [f"User: {msg['content']}" for msg in st.session_state.chat_messages if msg["role"] == "user"]
-                    chat_history = "\n".join(clean_history[-2:])
+                    chat_history = "\n".join(clean_history[-5:])
                     
                     extraction_prompt = (
                         "Extract the user's timetable data into JSON based on the 8 points discussed.\n"
@@ -151,14 +179,15 @@ with tab5:
                     )
                     
                     extracted_data = None
-                    for step in range(3):
+                    retry_c = 0
+                    while retry_c < 3:
                         try:
                             completion = client.chat.completions.create(
                                 model="llama-3.1-8b-instant",  
                                 messages=[{"role": "user", "content": extraction_prompt}],
                                 temperature=0.1,
                                 response_format={"type": "json_object"},
-                                max_tokens=2500 
+                                max_tokens=4500 # <-- MAXIMUM SAFE LIMIT FOR JSON
                             )
                             raw_output = completion.choices[0].message.content
                             clean_output = raw_output.strip()
@@ -169,9 +198,19 @@ with tab5:
                                     
                             extracted_data = json.loads(clean_output.strip())
                             break
-                        except Exception as e:
-                            time_module.sleep(5)
-                            continue
+                        except json.decoder.JSONDecodeError as je:
+                            st.error(f"⚠️ JSON Parsing Error: AI ne aadha JSON bheja. Error: {je}")
+                            break
+                        except Exception as api_err:
+                            err_str = str(api_err).lower()
+                            if "429" in err_str or "rate limit" in err_str:
+                                retry_c += 1
+                                st.toast(f"⏳ API Quota full. 60 seconds wait kar raha hai... ({retry_c}/3)")
+                                time_module.sleep(60)
+                                continue
+                            else:
+                                st.error(f"Error: {api_err}")
+                                break
                     
                     if extracted_data:
                         st.session_state.working_days = int(max(1, min(7, extracted_data.get("working_days", 6))))
@@ -200,18 +239,14 @@ with tab5:
                 valid_periods = []
                 global_p_idx = 0
                 
-                # --- FIX 1: SATURDAY HALF DAY & NO LUNCH ---
                 for d in range(working_days):
                     day_name = days_str[d]
-                    # If Saturday, only 4 periods
                     current_day_periods = 4 if day_name.lower() == "saturday" else periods_per_day
                     
                     for i in range(1, current_day_periods + 1):
                         global_p_idx += 1
                         period_labels.append(f"{day_name} - P{i}")
                         valid_periods.append(global_p_idx)
-                        
-                        # No lunch on Saturday
                         if i == break_at and day_name.lower() != "saturday": 
                             period_labels.append(f"{day_name} - LUNCH")
                 
@@ -234,15 +269,41 @@ with tab5:
                             for sub in [s.strip() for s in t_sub_raw.split(",")]:
                                 class_requirements[c].append((t_name, sub))
 
-                # --- FIX 2: REMOVE ACTIVITY MASTER HARDCODING ---
-                # (Removed the explicit Activity Master injection loop here)
+                teacher_global_load = {}
+                for c in classes_list:
+                    for (t_name, sub) in class_requirements[c]:
+                        teacher_global_load[t_name] = teacher_global_load.get(t_name, 0) + 1
+                
+                sanity_errors = []
+                for (t_name, load) in teacher_global_load.items():
+                    if t_name not in ["Library Master", "Self-Study / Free"] and load > total_weekly_periods:
+                        sanity_errors.append(f"Teacher '{t_name}' ko poore hafte ki {load} classes mili hain, par periods sirf {total_weekly_periods} hain.")
+                
+                if sanity_errors:
+                    st.error("🚨 WEEKLY DATA CONTRADICTIONS DETECTED:")
+                    for err in sanity_errors: st.write(f"- {err}")
+                    st.warning("Engine timetable banane ki koshish kar raha hai, par overloading problems ko theek karna padega!")
 
-                # --- FIX 3: FIX PADDING SPAM (NO MORE REV REV REV) ---
-                # Padding requirements to fill the WEEK simply with Free/Library
+                teacher_workload = {t.get("Teacher Name", ""): 0 for t in teachers_list}
+                teacher_workload["Library Master"] = 0
+                
+                for c in classes_list:
+                    for (t_name, sub) in class_requirements[c]:
+                        teacher_workload[t_name] = teacher_workload.get(t_name, 0) + 1
+
                 for c in classes_list:
                     while len(class_requirements[c]) < total_weekly_periods:
-                        class_requirements[c].append(("Self-Study / Free", "Library"))
-                    
+                        valid_pad_options = []
+                        for (t_name, sub) in set(class_requirements[c]): 
+                            if t_name not in ["Library Master", "Activity Master", "Self-Study / Free"] and teacher_workload.get(t_name, 0) < total_weekly_periods - 1:
+                                valid_pad_options.append((t_name, f"{sub} (Rev)"))
+                        if valid_pad_options:
+                            chosen = random.choice(valid_pad_options)
+                            class_requirements[c].append(chosen)
+                            teacher_workload[chosen[0]] += 1
+                        else:
+                            class_requirements[c].append(("Self-Study / Free", "Library"))
+                            teacher_workload["Library Master"] += 1
                     if len(class_requirements[c]) > total_weekly_periods:
                         class_requirements[c] = class_requirements[c][:total_weekly_periods]
 
@@ -297,4 +358,65 @@ with tab5:
                     st.success("✅ Tier 1 Success: Full Weekly Timetable generated!")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ Engine timed out.")
+                    st.warning("⚠️ Custom Engine timed out after 20 seconds. Falling back to Tier 2 (Google OR-Tools)...")
+                    if not ORTOOLS_AVAILABLE:
+                        st.error("❌ Fallback Failed: Google 'ortools' is not installed.")
+                    else:
+                        ortools_timetable = copy.deepcopy(initial_timetable)
+                        ortools_reqs = copy.deepcopy(class_requirements)
+                        
+                        model = cp_model.CpModel()
+                        x = {} 
+                        for c in classes_list:
+                            x[c] = {}
+                            for p in valid_periods:
+                                x[c][p] = {}
+                                for r_idx in range(len(ortools_reqs[c])):
+                                    x[c][p][r_idx] = model.NewBoolVar(f'assign_{c}_{p}_{r_idx}')
+
+                        for c in classes_list:
+                            for p in valid_periods:
+                                model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(ortools_reqs[c]))])
+
+                        for c in classes_list:
+                            for r_idx in range(len(ortools_reqs[c])):
+                                model.AddExactlyOne([x[c][p][r_idx] for p in valid_periods])
+
+                        all_teachers = set()
+                        for c in classes_list:
+                            for (t_name, sub) in ortools_reqs[c]:
+                                if t_name != "Self-Study / Free": all_teachers.add(t_name)
+
+                        for p in valid_periods:
+                            for teacher in all_teachers:
+                                teacher_assignments_in_period = []
+                                for c in classes_list:
+                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                        if req[0] == teacher:
+                                            teacher_assignments_in_period.append(x[c][p][r_idx])
+                                if len(teacher_assignments_in_period) > 1:
+                                    model.AddAtMostOne(teacher_assignments_in_period)
+
+                        solver = cp_model.CpSolver()
+                        solver.parameters.max_time_in_seconds = 30.0 
+                        status = solver.Solve(model)
+
+                        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+                            for c in classes_list:
+                                for p in valid_periods:
+                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                        if solver.Value(x[c][p][r_idx]) == 1:
+                                            p_label_idx = -1
+                                            for (idx, label) in enumerate(period_labels):
+                                                if not "LUNCH" in label:
+                                                    p_label_idx += 1
+                                                    if p_label_idx == p - 1:
+                                                        ortools_timetable[c][idx] = f"{req[1]} ({req[0]})"
+                                                        break
+                                            
+                            df = pd.DataFrame(ortools_timetable)
+                            df.insert(0, "Day / Period", period_labels)
+                            st.success(f"✅ Tier 2 Success: Full Weekly Timetable generated via OR-Tools! (Status: {solver.StatusName(status)})")
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+                        else:
+                            st.error("❌ ABSOLUTE DEADLOCK! Engine failed.")
