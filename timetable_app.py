@@ -1,4 +1,5 @@
-import streamlit as st
+def write_active_model_code():
+    code = """import streamlit as st
 import pandas as pd
 from datetime import datetime, time
 import time as time_module
@@ -142,7 +143,7 @@ with tab5:
                 with st.spinner("AI is thinking..."):
                     try:
                         completion = client.chat.completions.create(
-                            model="llama3-8b-8192",  # UPDATED TO A SUPPORTED, FAST MODEL
+                            model="llama-3.1-8b-instant",  # <--- OFFICIALLY ACTIVE FAST MODEL
                             messages=st.session_state.chat_messages,
                             temperature=0.3, 
                         )
@@ -190,7 +191,7 @@ with tab5:
                     
                     try:
                         completion = client.chat.completions.create(
-                            model="llama3-8b-8192",  # UPDATED TO A SUPPORTED, FAST MODEL
+                            model="llama-3.1-8b-instant",  # <--- OFFICIALLY ACTIVE FAST MODEL
                             messages=[{"role": "user", "content": extraction_prompt}],
                             temperature=0.1,
                             response_format={"type": "json_object"}
@@ -457,3 +458,10 @@ with tab5:
                         else:
                             st.error("❌ ABSOLUTE DEADLOCK! The remaining constraints are too tight to solve mathematically.")
                             st.info("💡 Pucho AI se (left side): 'Bhai deadlock aa raha hai, kaise theek karun?'")
+
+"""
+    with open('Advanced_Timetable_Pro_WorkingModel.txt', 'w', encoding='utf-8') as f:
+        f.write(code)
+    return "Model updated to llama-3.1-8b-instant."
+
+print(write_active_model_code())
