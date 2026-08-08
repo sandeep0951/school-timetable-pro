@@ -209,7 +209,7 @@ with tab5:
                             messages=[{"role": "user", "content": extraction_prompt}],
                             temperature=0.1,
                             response_format={"type": "json_object"},
-                            max_tokens=1500 
+                            max_tokens=4000 # [FIRM FIX: Locked properly to 4000 to handle massive loads]
                         )
                         
                         raw_output = completion.choices[0].message.content
@@ -445,6 +445,18 @@ with tab5:
                                             teacher_assignments_in_period.append(x[c][p][r_idx])
                                 if len(teacher_assignments_in_period) > 1:
                                     model.AddAtMostOne(teacher_assignments_in_period)
+
+                        for rule in fixed_rules:
+                            p_val = rule.get("period", 1)
+                            c_val = rule.get("class", "")
+                            t_val = rule.get("teacher", "")
+                            actual_p = p_val if p_val <= break_at else p_val + 1
+                            
+                            if c_val in classes_list and actual_p in valid_periods:
+                                for r_idx, req in enumerate(ortools_reqs[c_val]):
+                                    if req[0] == t_val:
+                                        model.Add(x[c_val][actual_p][r_idx] == 1)
+                                        break
 
                         solver = cp_model.CpSolver()
                         solver.parameters.max_time_in_seconds = 30.0 
