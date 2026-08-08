@@ -23,7 +23,7 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Pure Data Sync Edition)")
+st.title("🏫 Advanced Timetable Pro (Zero-Rev Clean Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -80,13 +80,12 @@ with tab5:
                 {
                     "role": "system", 
                     "content": (
-                        "You are a SILENT Data Collector. DO NOT summarize the data. DO NOT extract points in the chat.\n"
-                        "When the user pastes timetable data, your ONLY job is to acknowledge receipt.\n"
-                        "Reply EXACTLY with: '✅ Data Part Received. Aage ka data bhejein, ya pura ho gaya ho toh DONE likhein aur Sync dabayein.'\n"
-                        "DO NOT write anything else. DO NOT look for contradictions in the chat."
+                        "You are a SILENT Data Collector. DO NOT summarize the data.\n"
+                        "When user pastes data, reply EXACTLY with: '✅ Data Part Received. Aage ka data bhejein, ya DONE likhein.'\n"
+                        "DO NOT write anything else."
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data Parts me bhejein. Main ab koi summary nahi banaunga, sirf data chup-chaap save karunga taaki Sync ekdum perfect ho!"}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main chup-chaap save karunga."}
             ]
 
         chat_container = st.container(height=550)
@@ -106,51 +105,22 @@ with tab5:
                 with st.spinner("AI Process kar raha hai..."):
                     try:
                         messages_to_send = [st.session_state.chat_messages[0]]
-                        if len(st.session_state.chat_messages) > 5:
-                            messages_to_send.extend(st.session_state.chat_messages[-4:])
+                        if len(st.session_state.chat_messages) > 7:
+                            messages_to_send.extend(st.session_state.chat_messages[-6:])
                         else:
                             messages_to_send.extend(st.session_state.chat_messages[1:])
                             
-                        complete_response = ""
-                        retry_count = 0
-                        
-                        while True:
-                            try:
-                                completion = client.chat.completions.create(
-                                    model="llama-3.1-8b-instant",  
-                                    messages=messages_to_send,
-                                    temperature=0.1,
-                                    max_tokens=300
-                                )
-                                chunk = completion.choices[0].message.content
-                                complete_response += chunk
-                                break 
-                                    
-                            except Exception as api_err:
-                                err_str = str(api_err).lower()
-                                if "429" in err_str or "rate limit" in err_str:
-                                    retry_count += 1
-                                    st.toast(f"⏳ Rate Limit aayi! 15 sec wait karke automatically resume kar raha hai...")
-                                    time_module.sleep(15)
-                                    continue
-                                elif "413" in err_str:
-                                    # USER DEMAND: Rukega nahi, tukdo me karega
-                                    st.toast("⏳ Text bada ho gaya! AI automatically pichla hissa kaat kar aage badh raha hai bina ruke...")
-                                    if len(messages_to_send) > 2:
-                                        messages_to_send.pop(1) # Piche ka tukda udao, naya rakho
-                                    else:
-                                        # String hi aadhi kaat do
-                                        messages_to_send[-1]["content"] = messages_to_send[-1]["content"][-2000:]
-                                    continue # RUKNA NAHI HAI, WAPAS LOOP ME JAAO
-                                else:
-                                    st.error(f"API Error: {api_err}")
-                                    break
-                                    
-                        if complete_response:
-                            with chat_container:
-                                with st.chat_message("assistant"): st.markdown(complete_response)
-                            st.session_state.chat_messages.append({"role": "assistant", "content": complete_response})
-                            st.rerun()
+                        completion = client.chat.completions.create(
+                            model="llama-3.1-8b-instant",  
+                            messages=messages_to_send,
+                            temperature=0.1,
+                            max_tokens=300
+                        )
+                        response = completion.choices[0].message.content
+                        with chat_container:
+                            with st.chat_message("assistant"): st.markdown(response)
+                        st.session_state.chat_messages.append({"role": "assistant", "content": response})
+                        st.rerun()
                     except Exception as e:
                         st.error(f"System Error: {e}")
 
@@ -160,74 +130,45 @@ with tab5:
         if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Translating Complete Raw Data into UI Format (Auto-adjusting length)..."):
+                with st.spinner("Translating Complete Raw Data into UI Format..."):
                     clean_history = [f"User Data Part: {msg['content']}" for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     chat_history = "\n".join(clean_history)
                     
-                    # Ensure prompt is strictly bounded to prevent 413
-                    if len(chat_history) > 12000:
-                        chat_history = chat_history[-12000:] # Aakhiri ke words rakhega
-                        
                     extraction_prompt = (
-                        "Read ALL the provided user data parts and extract the timetable parameters accurately into JSON.\n"
-                        'Format EXACTLY like this JSON without any extra text:\n'
-                        '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A", "1st B"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A, 1st B"}],"fixed_rules":[]}\n\n'
+                        "Read ALL provided user data parts and extract timetable parameters into JSON.\n"
+                        'Format EXACTLY like this JSON without extra text:\n'
+                        '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A", "1st B"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A"}],"fixed_rules":[]}\n\n'
                         "Raw Data:\n" + chat_history
                     )
                     
-                    extracted_data = None
-                    retry_c = 0
-                    current_max_tokens = 2500 # Safe size
-                    
-                    while retry_c < 10: # Engine will fight up to 10 times, won't stop
-                        try:
-                            completion = client.chat.completions.create(
-                                model="llama-3.1-8b-instant",  
-                                messages=[{"role": "user", "content": extraction_prompt}],
-                                temperature=0.1,
-                                response_format={"type": "json_object"},
-                                max_tokens=current_max_tokens 
-                            )
-                            raw_output = completion.choices[0].message.content
-                            clean_output = raw_output.strip()
-                            bt = chr(96) * 3  
-                            if clean_output.startswith(bt + "json"): clean_output = clean_output[7:]
-                            elif clean_output.startswith(bt): clean_output = clean_output[3:]
-                            if clean_output.endswith(bt): clean_output = clean_output[:-3]
-                                    
-                            extracted_data = json.loads(clean_output.strip())
-                            break
-                        except json.decoder.JSONDecodeError as je:
-                            st.error(f"⚠️ JSON Parsing Error. AI ne JSON adhura chhoda. Engine retry kar raha hai...")
-                            retry_c += 1
-                            time_module.sleep(3)
-                            continue
-                        except Exception as api_err:
-                            err_str = str(api_err).lower()
-                            if "429" in err_str or "rate limit" in err_str:
-                                retry_c += 1
-                                st.toast(f"⏳ API Quota full. 20 seconds wait kar raha hai... ({retry_c}/10)")
-                                time_module.sleep(20)
-                                continue
-                            elif "413" in err_str:
-                                # USER DEMAND: TUKDO ME BHEJEGA, RUKEGA NAHI
-                                st.toast("⏳ Data size limit se bada ho gaya! Engine data ko chhota karke wapas retry kar raha hai...")
-                                extraction_prompt = extraction_prompt[1500:] # Start se kaat diya
-                                current_max_tokens = max(1000, current_max_tokens - 500) # Output token kam kardiye taaki prompt fit ho jaye
-                                continue # BINA ERROR DIYE WAPAS LOOP ME
-                            else:
-                                st.error(f"Error: {api_err}")
-                                break
-                    
-                    if extracted_data:
+                    try:
+                        completion = client.chat.completions.create(
+                            model="llama-3.1-8b-instant",  
+                            messages=[{"role": "user", "content": extraction_prompt}],
+                            temperature=0.1,
+                            response_format={"type": "json_object"},
+                            max_tokens=6000 
+                        )
+                        raw_output = completion.choices[0].message.content
+                        clean_output = raw_output.strip()
+                        bt = chr(96) * 3  
+                        if clean_output.startswith(bt + "json"): clean_output = clean_output[7:]
+                        elif clean_output.startswith(bt): clean_output = clean_output[3:]
+                        if clean_output.endswith(bt): clean_output = clean_output[:-3]
+                                
+                        extracted_data = json.loads(clean_output.strip())
+                        
                         st.session_state.working_days = int(max(1, min(7, extracted_data.get("working_days", 6))))
                         st.session_state.periods_per_day = int(max(1, min(20, extracted_data.get("periods_per_day", 8))))
                         st.session_state.break_at = int(max(1, min(15, extracted_data.get("break_at", 4))))
+                        
                         if "classes" in extracted_data: st.session_state.classes_df = pd.DataFrame({"Class Name": extracted_data["classes"]})
                         if "teachers" in extracted_data: st.session_state.teachers_df = pd.DataFrame(extracted_data["teachers"])
                         st.session_state.fixed_rules = extracted_data.get("fixed_rules", [])
                         st.success("✅ Rules Synced Successfully! Check Tabs 1-4. Now click Generate.")
                         st.rerun()
+                    except Exception as e:
+                        st.error(f"Sync Error: {e}")
 
         st.markdown("---")
         if st.button("🚀 2. Run Weekly Engine & Generate", type="primary", use_container_width=True):
@@ -276,41 +217,10 @@ with tab5:
                             for sub in [s.strip() for s in t_sub_raw.split(",")]:
                                 class_requirements[c].append((t_name, sub))
 
-                teacher_global_load = {}
-                for c in classes_list:
-                    for (t_name, sub) in class_requirements[c]:
-                        teacher_global_load[t_name] = teacher_global_load.get(t_name, 0) + 1
-                
-                sanity_errors = []
-                for (t_name, load) in teacher_global_load.items():
-                    if t_name not in ["Library Master", "Self-Study / Free"] and load > total_weekly_periods:
-                        sanity_errors.append(f"Teacher '{t_name}' ko poore hafte ki {load} classes mili hain, par periods sirf {total_weekly_periods} hain.")
-                
-                if sanity_errors:
-                    st.error("🚨 WEEKLY DATA CONTRADICTIONS DETECTED:")
-                    for err in sanity_errors: st.write(f"- {err}")
-                    st.warning("Engine timetable banane ki koshish kar raha hai, par overloading problems ko theek karna padega!")
-
-                teacher_workload = {t.get("Teacher Name", ""): 0 for t in teachers_list}
-                teacher_workload["Library Master"] = 0
-                
-                for c in classes_list:
-                    for (t_name, sub) in class_requirements[c]:
-                        teacher_workload[t_name] = teacher_workload.get(t_name, 0) + 1
-
+                # STRICT CLEAN PADDING: NO MORE (REV) SPAM! ONLY LIBRARY / FREE
                 for c in classes_list:
                     while len(class_requirements[c]) < total_weekly_periods:
-                        valid_pad_options = []
-                        for (t_name, sub) in set(class_requirements[c]): 
-                            if t_name not in ["Library Master", "Activity Master", "Self-Study / Free"] and teacher_workload.get(t_name, 0) < total_weekly_periods - 1:
-                                valid_pad_options.append((t_name, f"{sub} (Rev)"))
-                        if valid_pad_options:
-                            chosen = random.choice(valid_pad_options)
-                            class_requirements[c].append(chosen)
-                            teacher_workload[chosen[0]] += 1
-                        else:
-                            class_requirements[c].append(("Self-Study / Free", "Library"))
-                            teacher_workload["Library Master"] += 1
+                        class_requirements[c].append(("Self-Study", "Library"))
                     if len(class_requirements[c]) > total_weekly_periods:
                         class_requirements[c] = class_requirements[c][:total_weekly_periods]
 
@@ -341,7 +251,7 @@ with tab5:
                     for req in custom_reqs[c]:
                         if req not in seen_reqs: 
                             seen_reqs.add(req)
-                            if req[0] not in custom_busy[p_idx] or req[0] == "Self-Study / Free":
+                            if req[0] not in custom_busy[p_idx] or req[0] == "Self-Study":
                                 valid_reqs.append(req)
                     
                     random.shuffle(valid_reqs) 
@@ -353,7 +263,7 @@ with tab5:
                         custom_reqs[c].remove(req) 
                         if solve_custom(next_p_idx, next_c_idx): return True
                         custom_timetable[c][p_idx] = "Free"
-                        if t_name != "Self-Study / Free": custom_busy[p_idx].remove(t_name)
+                        if t_name != "Self-Study": custom_busy[p_idx].remove(t_name)
                         custom_reqs[c].append(req) 
                     return False
 
@@ -362,10 +272,10 @@ with tab5:
                 if custom_success:
                     df = pd.DataFrame(custom_timetable)
                     df.insert(0, "Day / Period", period_labels)
-                    st.success("✅ Tier 1 Success: Full Weekly Timetable generated!")
+                    st.success("✅ Tier 1 Success: Full Clean Weekly Timetable generated!")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ Custom Engine timed out after 20 seconds. Falling back to Tier 2 (Google OR-Tools)...")
+                    st.warning("⚠️ Engine timed out. Falling back to OR-Tools...")
                     if not ORTOOLS_AVAILABLE:
                         st.error("❌ Fallback Failed: Google 'ortools' is not installed.")
                     else:
@@ -392,7 +302,7 @@ with tab5:
                         all_teachers = set()
                         for c in classes_list:
                             for (t_name, sub) in ortools_reqs[c]:
-                                if t_name != "Self-Study / Free": all_teachers.add(t_name)
+                                if t_name != "Self-Study": all_teachers.add(t_name)
 
                         for p in valid_periods:
                             for teacher in all_teachers:
