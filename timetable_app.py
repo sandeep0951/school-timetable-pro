@@ -23,7 +23,7 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Fixed Smart Chat Edition)")
+st.title("🏫 Advanced Timetable Pro (Robust Master Sync Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -80,12 +80,12 @@ with tab5:
                 {
                     "role": "system", 
                     "content": (
-                        "You are a smart Timetable Assistant.\n"
-                        "When the user sends data parts, acknowledge them naturally (e.g., 'Data part saved successfully. Bhejte rahiye.').\n"
-                        "When the user says 'DONE' or 'pura ho gaya', confirm that data collection is complete and tell them to click the '🔄 1. Sync AI Rules from Chat' button on the right."
+                        "You are a SILENT Data Collector. DO NOT summarize the data.\n"
+                        "When user pastes data parts, reply EXACTLY with: '✅ Data Part Received. Aage ka data bhejein, ya DONE likhein.'\n"
+                        "DO NOT write anything else."
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Jab poora ho jaye toh 'DONE' likh dena, main sab yaad rakhunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main sabhi teachers, subjects aur rules ko dhyan se save karunga."}
             ]
 
         chat_container = st.container(height=550)
@@ -102,24 +102,36 @@ with tab5:
 
             if not client: st.error("❌ Groq API Key missing!")
             else:
-                with st.spinner("AI samajh raha hai..."):
+                with st.spinner("AI tukdo mein process kar raha hai..."):
                     try:
-                        messages_to_send = [st.session_state.chat_messages[0]]
-                        if len(st.session_state.chat_messages) > 7:
-                            messages_to_send.extend(st.session_state.chat_messages[-6:])
-                        else:
-                            messages_to_send.extend(st.session_state.chat_messages[1:])
+                        chunk_size = 2500
+                        prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
+                        
+                        final_ai_reply = ""
+                        for c_idx, chunk_text in enumerate(prompt_chunks):
+                            messages_to_send = [
+                                st.session_state.chat_messages[0],
+                                {"role": "user", "content": f"[Chunk {c_idx+1}]: {chunk_text}"}
+                            ]
                             
-                        completion = client.chat.completions.create(
-                            model="llama-3.1-8b-instant",  
-                            messages=messages_to_send,
-                            temperature=0.3,
-                            max_tokens=500
-                        )
-                        response = completion.choices[0].message.content
+                            for attempt in range(5):
+                                try:
+                                    completion = client.chat.completions.create(
+                                        model="llama-3.1-8b-instant",  
+                                        messages=messages_to_send,
+                                        temperature=0.1,
+                                        max_tokens=300
+                                    )
+                                    final_ai_reply += completion.choices[0].message.content + " "
+                                    time_module.sleep(1)
+                                    break
+                                except Exception as chunk_err:
+                                    time_module.sleep(10)
+                                    continue
+                                        
                         with chat_container:
-                            with st.chat_message("assistant"): st.markdown(response)
-                        st.session_state.chat_messages.append({"role": "assistant", "content": response})
+                            with st.chat_message("assistant"): st.markdown(final_ai_reply)
+                        st.session_state.chat_messages.append({"role": "assistant", "content": final_ai_reply})
                         st.rerun()
                     except Exception as e:
                         st.error(f"System Error: {e}")
@@ -130,7 +142,7 @@ with tab5:
         if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Syncing all data, rules & constraints into Master Memory..."):
+                with st.spinner("Syncing all data without losing anything..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
                     master_working_days = st.session_state.working_days
@@ -143,9 +155,9 @@ with tab5:
                     for idx, part in enumerate(user_msgs):
                         st.toast(f"Processing part {idx+1} of {len(user_msgs)}...")
                         extraction_prompt = (
-                            "Extract timetable elements, teachers, classes, and special rules (like Class Teacher period, continuous teaching limits, etc.) from this chunk into JSON.\n"
+                            "Carefully read this text chunk. Extract ALL teacher names, their subjects, classes they teach, working days, periods, and any rules mentioned.\n"
                             'Format EXACTLY like this JSON:\n'
-                            '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A"}],"fixed_rules":[{"rule":"Class Teacher Period on Monday P1"}]}\n\n'
+                            '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A", "1st B"],"teachers":[{"Teacher Name":"Mr. Rohan Das","Subject":"Maths","Allowed Classes":"All"}],"fixed_rules":[{"rule":"Class Teacher Period on Monday P1"}]}\n\n'
                             "Text Chunk:\n" + part
                         )
                         
@@ -155,7 +167,7 @@ with tab5:
                                 messages=[{"role": "user", "content": extraction_prompt}],
                                 temperature=0.1,
                                 response_format={"type": "json_object"},
-                                max_tokens=1500
+                                max_tokens=2000
                             )
                             raw_output = completion.choices[0].message.content
                             clean_output = raw_output.strip()
@@ -201,7 +213,7 @@ with tab5:
                     if all_rules:
                         st.session_state.fixed_rules = all_rules
                         
-                    st.success("✅ All Data, Teachers & Rules Synced Successfully! Check Tabs 1-4.")
+                    st.success("✅ Master Sync Complete! Check Tabs 1-4 to verify classes and teachers.")
                     st.rerun()
 
         st.markdown("---")
