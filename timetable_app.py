@@ -51,7 +51,7 @@ if "teachers_df" not in st.session_state:
 if "fixed_rules" not in st.session_state: 
     st.session_state.fixed_rules = []
 
-# --- TAB LAYOUT ---
+# --- TAB LAYOUT (REDUCED TO 5 TABS) ---
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🕒 1. Timings", 
     "🏫 2. Classes", 
@@ -67,8 +67,12 @@ with tab1:
     st.header("School Timings & Periods Configuration")
     col1, col2 = st.columns(2)
     with col1:
-        st.session_state.num_periods = st.number_input("Total Number of Periods", min_value=1, max_value=20, value=st.session_state.num_periods)
-        st.session_state.break_at = st.number_input("Break happens AFTER which period?", min_value=1, max_value=15, value=st.session_state.break_at)
+        # [BUG FIX: SAFE CLAMPING] Make sure values never exceed limits
+        safe_periods = int(max(1, min(20, st.session_state.num_periods)))
+        st.session_state.num_periods = st.number_input("Total Number of Periods", min_value=1, max_value=20, value=safe_periods)
+        
+        safe_break = int(max(1, min(15, st.session_state.break_at)))
+        st.session_state.break_at = st.number_input("Break happens AFTER which period?", min_value=1, max_value=15, value=safe_break)
     
     with col2:
         st.write("Custom Period Durations:")
@@ -92,6 +96,9 @@ with tab4:
 with tab5:
     col_chat, col_engine = st.columns([4, 6], gap="large")
     
+    # ------------------------------------------
+    # LEFT COLUMN: AI CO-PILOT CHAT
+    # ------------------------------------------
     with col_chat:
         col_c1, col_c2 = st.columns([7, 3])
         with col_c1:
@@ -138,7 +145,6 @@ with tab5:
                 with st.spinner("AI is thinking..."):
                     try:
                         # [SMART BALANCED MEMORY FOR CHAT]
-                        # System prompt + Aakhiri 4 messages yaad rakhega (Context zinda rahega, Limit cross nahi hogi)
                         messages_to_send = [st.session_state.chat_messages[0]]
                         if len(st.session_state.chat_messages) > 5:
                             messages_to_send.extend(st.session_state.chat_messages[-4:])
@@ -161,6 +167,9 @@ with tab5:
                     except Exception as e:
                         st.error(f"Error connecting to Groq API: {e}")
 
+    # ------------------------------------------
+    # RIGHT COLUMN: GENERATION ENGINE
+    # ------------------------------------------
     with col_engine:
         st.subheader("⚙️ Action Center & Engine")
         
@@ -171,13 +180,11 @@ with tab5:
                 st.warning("⚠️ Pehle AI se kuch rules discuss karein (Left side mein)!")
             else:
                 with st.spinner("Translating Chat History into UI Data..."):
-                    # [SMART BALANCED MEMORY FOR SYNC]
                     clean_history = []
                     for msg in st.session_state.chat_messages:
                         if msg["role"] != "system":
                             clean_history.append(f"{msg['role'].capitalize()}: {msg['content']}")
                     
-                    # Aakhiri 6 messages (User aur AI dono) bheje jayenge taaki extract karte waqt context mile
                     chat_history = "\n".join(clean_history[-6:])
 
                     extraction_prompt = (
@@ -196,8 +203,12 @@ with tab5:
                         )
                         extracted_data = json.loads(completion.choices[0].message.content)
                         
-                        st.session_state.num_periods = extracted_data.get("num_periods", 7)
-                        st.session_state.break_at = extracted_data.get("break_at", 3)
+                        # [BUG FIX: SAFE CLAMPING FOR JSON PARSING]
+                        raw_periods = extracted_data.get("num_periods", 7)
+                        st.session_state.num_periods = int(max(1, min(20, raw_periods)))
+                        
+                        raw_break = extracted_data.get("break_at", 3)
+                        st.session_state.break_at = int(max(1, min(15, raw_break)))
                         
                         if "durations" in extracted_data:
                             st.session_state.periods_timing_df = pd.DataFrame(extracted_data["durations"])
