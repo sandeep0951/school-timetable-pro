@@ -23,11 +23,14 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Rules Extractor Edition)")
+st.title("🏫 Advanced Timetable Pro (Dynamic Rules Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
 if "break_at" not in st.session_state: st.session_state.break_at = 4
+# THE FIX: Added a dynamic variable for Saturday Half Day
+if "saturday_half_day" not in st.session_state: st.session_state.saturday_half_day = False 
+
 if "periods_timing_df" not in st.session_state:
     slots = [{"Slot": f"Period {i}", "Duration (Mins)": 40} for i in range(1, 9)]
     slots.insert(4, {"Slot": "LUNCH BREAK", "Duration (Mins)": 40})
@@ -39,7 +42,8 @@ if "teachers_df" not in st.session_state:
     st.session_state.teachers_df = pd.DataFrame({
         "Teacher Name": ["Mr. Rohan Das", "Coach Ravi", "Mrs. Anita Sharma"],
         "Subject": ["Maths", "Sports", "English"],
-        "Allowed Classes": ["All", "All", "1st A, 1st B"]
+        "Allowed Classes": ["All", "All", "1st A, 1st B"],
+        "Periods/Week (Per Class)": [6, 4, 6] 
     })
 if "fixed_rules" not in st.session_state: 
     st.session_state.fixed_rules = []
@@ -52,6 +56,8 @@ with tab1:
         st.session_state.working_days = st.number_input("Working Days per Week", min_value=1, max_value=7, value=int(st.session_state.working_days))
         st.session_state.periods_per_day = st.number_input("Periods per Day", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
         st.session_state.break_at = st.number_input("Lunch Break AFTER period?", min_value=1, max_value=15, value=int(st.session_state.break_at))
+        # UI Toggle for Half Day
+        st.session_state.saturday_half_day = st.checkbox("Is Saturday a Half-Day (4 Periods only)?", value=st.session_state.saturday_half_day)
     with col2:
         st.session_state.periods_timing_df = st.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
 
@@ -86,7 +92,7 @@ with tab5:
                         "DO NOT write anything else."
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main chup-chaap Master Checklist ke mutabik kaam karunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main chup-chaap save karunga."}
             ]
 
         chat_container = st.container(height=550)
@@ -159,6 +165,7 @@ with tab5:
                     master_working_days = st.session_state.working_days
                     master_periods_per_day = st.session_state.periods_per_day
                     master_break_at = st.session_state.break_at
+                    master_saturday_half_day = st.session_state.saturday_half_day
                     all_classes = []
                     all_rules = []
                     teacher_map = {}
@@ -169,17 +176,18 @@ with tab5:
                             
                         st.toast(f"Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
                         
-                        # THE MASTER FIX: Giving a proper example of fixed_rules to the AI
                         extraction_prompt = (
-                            "Carefully read this text chunk. Extract ALL teacher names, subjects, classes, working days, periods, and ANY special rules or constraints mentioned.\n"
+                            "Carefully read this text chunk. Extract ALL teacher names, subjects, classes, working days, periods, rules, AND explicitly check if Saturday is mentioned as a half-day.\n"
+                            'Also determine "Periods/Week (Per Class)" for teachers if mentioned.\n'
                             'Format EXACTLY like this JSON:\n'
                             '{\n'
                             '  "working_days": 6,\n'
                             '  "periods_per_day": 8,\n'
                             '  "break_at": 4,\n'
+                            '  "saturday_half_day": true,\n'
                             '  "classes": ["1st A", "1st B"],\n'
-                            '  "teachers": [{"Teacher Name": "Mr. Rohan Das", "Subject": "Maths", "Allowed Classes": "All"}],\n'
-                            '  "fixed_rules": ["The very 1st period on Monday for every section must be reserved as the Class Teacher period", "Teacher should not teach 3 consecutive periods"]\n'
+                            '  "teachers": [{"Teacher Name": "Mr. Rohan Das", "Subject": "Maths", "Allowed Classes": "All", "Periods/Week (Per Class)": 6}],\n'
+                            '  "fixed_rules": ["The very 1st period on Monday for every section must be reserved as the Class Teacher period"]\n'
                             '}\n\n'
                             "Text Chunk:\n" + part
                         )
@@ -204,6 +212,14 @@ with tab5:
                             if part_data.get("working_days"): master_working_days = int(part_data["working_days"])
                             if part_data.get("periods_per_day"): master_periods_per_day = int(part_data["periods_per_day"])
                             if part_data.get("break_at"): master_break_at = int(part_data["break_at"])
+                            
+                            # THE FIX: Safely parse saturday half day boolean
+                            if "saturday_half_day" in part_data:
+                                if str(part_data["saturday_half_day"]).lower() == "true":
+                                    master_saturday_half_day = True
+                                elif str(part_data["saturday_half_day"]).lower() == "false":
+                                    master_saturday_half_day = False
+                            
                             if part_data.get("classes"): all_classes.extend(part_data["classes"])
                             if part_data.get("fixed_rules"): all_rules.extend(part_data["fixed_rules"])
                             
@@ -212,6 +228,7 @@ with tab5:
                                     name = t.get("Teacher Name", "Unknown").strip()
                                     sub = t.get("Subject", "").strip()
                                     cls = t.get("Allowed Classes", "").strip()
+                                    p_week = t.get("Periods/Week (Per Class)", 6) # Default 6, flexible for engine
                                     
                                     if name in teacher_map:
                                         existing_subs = set([s.strip() for s in teacher_map[name]["Subject"].split(",")])
@@ -224,7 +241,10 @@ with tab5:
                                             teacher_map[name]["Allowed Classes"] = "All"
                                         else:
                                             teacher_map[name]["Allowed Classes"] = ", ".join(existing_cls.union(new_cls))
+                                            
+                                        teacher_map[name]["Periods/Week (Per Class)"] = p_week
                                     else:
+                                        t["Periods/Week (Per Class)"] = p_week
                                         teacher_map[name] = t
                             
                             time_module.sleep(2) 
@@ -234,6 +254,7 @@ with tab5:
                     st.session_state.working_days = int(max(1, min(7, master_working_days)))
                     st.session_state.periods_per_day = int(max(1, min(20, master_periods_per_day)))
                     st.session_state.break_at = int(max(1, min(15, master_break_at)))
+                    st.session_state.saturday_half_day = master_saturday_half_day
                     
                     unique_classes = sorted(list(set(all_classes)))
                     if unique_classes:
@@ -242,9 +263,7 @@ with tab5:
                     if teacher_map:
                         st.session_state.teachers_df = pd.DataFrame(list(teacher_map.values()))
                         
-                    # Remove duplicate rules!
                     if all_rules:
-                        # Convert to string if they are dictionaries, otherwise just deduplicate strings
                         cleaned_rules = []
                         for r in all_rules:
                             rule_text = r.get("rule", r) if isinstance(r, dict) else r
@@ -265,6 +284,7 @@ with tab5:
                 working_days = st.session_state.working_days
                 break_at = st.session_state.break_at
                 fixed_rules = st.session_state.fixed_rules
+                is_sat_half = st.session_state.saturday_half_day
                 
                 days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
                 period_labels = []
@@ -273,13 +293,20 @@ with tab5:
                 
                 for d in range(working_days):
                     day_name = days_str[d]
-                    current_day_periods = 4 if day_name.lower() == "saturday" else periods_per_day
+                    
+                    # THE FIX: Dynamic period generation based on prompt rules
+                    if day_name.lower() == "saturday" and is_sat_half:
+                        current_day_periods = 4
+                    else:
+                        current_day_periods = periods_per_day
                     
                     for i in range(1, current_day_periods + 1):
                         global_p_idx += 1
                         period_labels.append(f"{day_name} - P{i}")
                         valid_periods.append(global_p_idx)
-                        if i == break_at and day_name.lower() != "saturday": 
+                        
+                        # Only add lunch if it's not a half day
+                        if i == break_at and not (day_name.lower() == "saturday" and is_sat_half): 
                             period_labels.append(f"{day_name} - LUNCH")
                 
                 total_weekly_periods = len(valid_periods)
@@ -295,13 +322,26 @@ with tab5:
                     t_name = t.get("Teacher Name", "")
                     t_sub_raw = str(t.get("Subject", ""))
                     t_allowed_str = str(t.get("Allowed Classes", "")).strip()
-                    allowed_classes = classes_list if (t_allowed_str.lower() == "all" or t_allowed_str == "") else [x.strip() for x in t_allowed_str.split(",")]
                     
-                    for c in allowed_classes:
-                        if c in classes_list:
-                            for sub in [s.strip() for s in t_sub_raw.split(",")]:
-                                for _ in range(working_days):
-                                    class_requirements[c].append((t_name, sub))
+                    # Ensure Period/Week isn't larger than total weekly periods
+                    try:
+                        p_per_class = int(t.get("Periods/Week (Per Class)", working_days))
+                    except:
+                        p_per_class = working_days
+                        
+                    if p_per_class > total_weekly_periods:
+                         p_per_class = total_weekly_periods
+
+                    if str(t_allowed_str).lower() == "all" or str(t_allowed_str) == "":
+                        actual_classes = classes_list
+                    else:
+                        allowed_lower = [x.strip().lower() for x in str(t_allowed_str).split(",")]
+                        actual_classes = [c for c in classes_list if c.lower() in allowed_lower]
+                        
+                    for c in actual_classes:
+                        for sub in [s.strip() for s in t_sub_raw.split(",")]:
+                            for _ in range(p_per_class):
+                                class_requirements[c].append((t_name, sub))
 
                 teacher_global_load = {}
                 for c in classes_list:
@@ -311,12 +351,12 @@ with tab5:
                 sanity_errors = []
                 for (t_name, load) in teacher_global_load.items():
                     if t_name not in ["Library Master", "Self-Study"] and load > total_weekly_periods:
-                        sanity_errors.append(f"Teacher '{t_name}' ko hafte ki {load} classes mili hain, par periods sirf {total_weekly_periods} hain. Isse clash hoga.")
+                        sanity_errors.append(f"Teacher '{t_name}' ko hafte ki {load} classes mili hain, par total periods sirf {total_weekly_periods} hain. Isse clash hoga.")
                 
                 if sanity_errors:
                     st.error("🚨 WEEKLY DATA CONTRADICTIONS DETECTED:")
                     for err in sanity_errors: st.write(f"- {err}")
-                    st.warning("Engine timetable banane ki koshish kar raha hai, par overriding periods ko neglect karna pad sakta hai!")
+                    st.warning("Engine timetable banane ki koshish kar raha hai, par over-load periods ignore karne pad sakte hain.")
 
                 for c in classes_list:
                     if len(class_requirements[c]) > total_weekly_periods:
