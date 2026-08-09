@@ -7,6 +7,7 @@ import json
 import random
 import sys
 import copy
+import re
 
 # Attempt to import Google OR-Tools
 try:
@@ -23,12 +24,11 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Dynamic Prompt Edition)")
+st.title("🏫 Advanced Timetable Pro (True Rule-Engine Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
 if "break_at" not in st.session_state: st.session_state.break_at = 4
-# Flexible logic strictly driven by prompt data
 if "saturday_half_day" not in st.session_state: st.session_state.saturday_half_day = False 
 
 if "periods_timing_df" not in st.session_state:
@@ -90,7 +90,7 @@ with tab5:
                         "DO NOT write anything else."
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main chup-chaap save karunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main rules ko extract karke engine ko enforce karne ko kahunga."}
             ]
 
         chat_container = st.container(height=550)
@@ -176,7 +176,7 @@ with tab5:
                         
                         extraction_prompt = (
                             "Carefully read this text chunk. Extract ALL teacher names, subjects, classes, working days, periods, rules.\n"
-                            'Also explicitly check if Saturday (or any other day) is mentioned as a half-day. Do NOT assume it is a half-day unless the text says so.\n'
+                            'Explicitly check if Saturday (or any other day) is mentioned as a half-day.\n'
                             'Also determine "Periods/Week (Per Class)" for teachers if mentioned.\n'
                             'Format EXACTLY like this JSON:\n'
                             '{\n'
@@ -186,7 +186,7 @@ with tab5:
                             '  "saturday_half_day": false,\n'
                             '  "classes": ["1st A", "1st B"],\n'
                             '  "teachers": [{"Teacher Name": "Mr. Rohan Das", "Subject": "Maths", "Allowed Classes": "All", "Periods/Week (Per Class)": 6}],\n'
-                            '  "fixed_rules": ["The very 1st period on Monday for every section must be reserved as the Class Teacher period"]\n'
+                            '  "fixed_rules": ["The very 1st period on Monday for every section must be reserved as the Class Teacher period", "Max 3 consecutive periods"]\n'
                             '}\n\n'
                             "Text Chunk:\n" + part
                         )
@@ -212,7 +212,6 @@ with tab5:
                             if part_data.get("periods_per_day"): master_periods_per_day = int(part_data["periods_per_day"])
                             if part_data.get("break_at"): master_break_at = int(part_data["break_at"])
                             
-                            # Flexible logic driven strictly by user data
                             if "saturday_half_day" in part_data:
                                 if str(part_data["saturday_half_day"]).lower() == "true":
                                     master_saturday_half_day = True
@@ -274,7 +273,7 @@ with tab5:
 
         st.markdown("---")
         if st.button("🚀 2. Run Weekly Engine & Generate", type="primary", use_container_width=True):
-            with st.spinner("Analyzing Weekly Requirements & Engine limits..."):
+            with st.spinner("Applying Rules & Running Engine..."):
                 sys.setrecursionlimit(5000)
                 
                 classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
@@ -285,6 +284,15 @@ with tab5:
                 fixed_rules = st.session_state.fixed_rules
                 is_sat_half = st.session_state.saturday_half_day
                 
+                # RULE PARSER: Interpret natural language rules for the engine
+                rule_max_consecutive = 10 # Default (no limit)
+                for r in fixed_rules:
+                    r_lower = r.lower()
+                    if "consecutive" in r_lower or "continuous" in r_lower:
+                        nums = re.findall(r'\d+', r_lower)
+                        if nums:
+                            rule_max_consecutive = int(nums[0])
+                
                 days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
                 period_labels = []
                 valid_periods = []
@@ -292,8 +300,6 @@ with tab5:
                 
                 for d in range(working_days):
                     day_name = days_str[d]
-                    
-                    # Engine follows the dynamic rule explicitly detected from user prompt
                     if day_name.lower() == "saturday" and is_sat_half:
                         current_day_periods = 4
                     else:
@@ -348,12 +354,11 @@ with tab5:
                 sanity_errors = []
                 for (t_name, load) in teacher_global_load.items():
                     if t_name not in ["Library Master", "Self-Study"] and load > total_weekly_periods:
-                        sanity_errors.append(f"Teacher '{t_name}' ko hafte ki {load} classes mili hain, par total periods sirf {total_weekly_periods} hain. Isse clash hoga.")
+                        sanity_errors.append(f"Teacher '{t_name}' ko hafte ki {load} classes mili hain, par total periods {total_weekly_periods} hain. Isse clash hoga.")
                 
                 if sanity_errors:
                     st.error("🚨 WEEKLY DATA CONTRADICTIONS DETECTED:")
                     for err in sanity_errors: st.write(f"- {err}")
-                    st.warning("Engine timetable banane ki koshish kar raha hai, par over-load periods ignore karne pad sakte hain.")
 
                 for c in classes_list:
                     if len(class_requirements[c]) > total_weekly_periods:
@@ -363,7 +368,7 @@ with tab5:
                     while len(class_requirements[c]) < total_weekly_periods:
                         class_requirements[c].append(("Self-Study", "Library"))
 
-                st.info(f"🔄 Running Python Engine for {working_days} Days ({total_weekly_periods} valid periods per class)...")
+                st.info(f"🔄 Running Python Engine for {working_days} Days (Max Consecutive Load Rule = {rule_max_consecutive})...")
                 
                 custom_timetable = copy.deepcopy(initial_timetable)
                 custom_busy = copy.deepcopy(initial_busy_teachers)
@@ -391,6 +396,21 @@ with tab5:
                         if req not in seen_reqs: 
                             seen_reqs.add(req)
                             if req[0] not in custom_busy[p_idx] or req[0] == "Self-Study":
+                                # RULE ENFORCEMENT: Check consecutive periods
+                                t_name_check = req[0]
+                                if t_name_check != "Self-Study":
+                                    consecutive = 0
+                                    # Look backward in same day
+                                    for back_p in range(p_idx - 1, -1, -1):
+                                        if "LUNCH" in period_labels[back_p]:
+                                            break # Lunch resets consecutive limit
+                                        if t_name_check in custom_busy[back_p]:
+                                            consecutive += 1
+                                        else:
+                                            break
+                                    if consecutive >= rule_max_consecutive:
+                                        continue # Violates consecutive rule, skip this assignment
+                                
                                 valid_reqs.append(req)
                     
                     random.shuffle(valid_reqs) 
@@ -413,10 +433,10 @@ with tab5:
                 if custom_success:
                     df = pd.DataFrame(custom_timetable)
                     df.insert(0, "Day / Period", period_labels)
-                    st.success("✅ Tier 1 Success: Master Weekly Timetable generated perfectly!")
+                    st.success("✅ Tier 1 Success: Master Weekly Timetable generated perfectly with Custom Rules!")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ Custom Engine timed out. Falling back to Tier 2 (Google OR-Tools)...")
+                    st.warning("⚠️ Custom Engine timed out. Rules too strict. Falling back to Tier 2 (Google OR-Tools)...")
                     if not ORTOOLS_AVAILABLE:
                         st.error("❌ Fallback Failed: Google 'ortools' is not installed.")
                     else:
@@ -455,6 +475,30 @@ with tab5:
                                 if len(teacher_assignments_in_period) > 1:
                                     model.AddAtMostOne(teacher_assignments_in_period)
 
+                        # RULE ENFORCEMENT OR-TOOLS: Max Consecutive Periods
+                        if rule_max_consecutive < len(valid_periods):
+                            day_wise_periods = {}
+                            for p_idx_label, label in enumerate(period_labels):
+                                if "LUNCH" not in label:
+                                    day = label.split(" - ")[0]
+                                    real_p = valid_periods[len([px for px in period_labels[:p_idx_label+1] if "LUNCH" not in px]) - 1]
+                                    if day not in day_wise_periods:
+                                        day_wise_periods[day] = []
+                                    day_wise_periods[day].append(real_p)
+                                    
+                            for teacher in all_teachers:
+                                for day, d_periods in day_wise_periods.items():
+                                    for start_idx in range(len(d_periods) - rule_max_consecutive):
+                                        window = d_periods[start_idx : start_idx + rule_max_consecutive + 1]
+                                        teacher_vars_in_window = []
+                                        for wp in window:
+                                            for c in classes_list:
+                                                for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                                    if req[0] == teacher:
+                                                        teacher_vars_in_window.append(x[c][wp][r_idx])
+                                        if teacher_vars_in_window:
+                                            model.Add(sum(teacher_vars_in_window) <= rule_max_consecutive)
+
                         solver = cp_model.CpSolver()
                         solver.parameters.max_time_in_seconds = 30.0 
                         status = solver.Solve(model)
@@ -474,7 +518,7 @@ with tab5:
                                             
                             df = pd.DataFrame(ortools_timetable)
                             df.insert(0, "Day / Period", period_labels)
-                            st.success(f"✅ Tier 2 Success: Timetable generated via OR-Tools! (Status: {solver.StatusName(status)})")
+                            st.success(f"✅ Tier 2 Success: Timetable generated with Rules via OR-Tools! (Status: {solver.StatusName(status)})")
                             st.dataframe(df, use_container_width=True, hide_index=True)
                         else:
-                            st.error("❌ ABSOLUTE DEADLOCK! Data itna complex hai ki koi bhi valid timetable nahi ban pa raha. Rules ko thoda relax karein.")
+                            st.error("❌ ABSOLUTE DEADLOCK! Engine could not place classes while following the strict rules.")
