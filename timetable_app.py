@@ -23,7 +23,7 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (The Master Checklist Edition)")
+st.title("🏫 Advanced Timetable Pro (Rules Extractor Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -127,7 +127,7 @@ with tab5:
                                         max_tokens=100
                                     )
                                     resp_chunk = completion.choices[0].message.content
-                                    final_ai_reply = resp_chunk # Silent collector output only needs one acknowledgment
+                                    final_ai_reply = resp_chunk
                                     time_module.sleep(1)
                                     break
                                 except Exception as chunk_err:
@@ -161,20 +161,26 @@ with tab5:
                     master_break_at = st.session_state.break_at
                     all_classes = []
                     all_rules = []
-                    
-                    # Teacher map directly handles duplicate entries correctly
                     teacher_map = {}
                     
                     for idx, part in enumerate(user_msgs):
                         if part.strip().lower() == "done" or len(part) < 10:
-                            continue # Skip empty commands
+                            continue 
                             
                         st.toast(f"Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
+                        
+                        # THE MASTER FIX: Giving a proper example of fixed_rules to the AI
                         extraction_prompt = (
-                            "Extract timetable data from this text chunk into JSON format.\n"
-                            'Include working_days, periods_per_day, break_at, classes, teachers (with Teacher Name, Subject, Allowed Classes), and fixed_rules.\n'
+                            "Carefully read this text chunk. Extract ALL teacher names, subjects, classes, working days, periods, and ANY special rules or constraints mentioned.\n"
                             'Format EXACTLY like this JSON:\n'
-                            '{"working_days":6,"periods_per_day":8,"break_at":4,"classes":["1st A"],"teachers":[{"Teacher Name":"Balram","Subject":"Sanskrit","Allowed Classes":"1st A"}],"fixed_rules":[]}\n\n'
+                            '{\n'
+                            '  "working_days": 6,\n'
+                            '  "periods_per_day": 8,\n'
+                            '  "break_at": 4,\n'
+                            '  "classes": ["1st A", "1st B"],\n'
+                            '  "teachers": [{"Teacher Name": "Mr. Rohan Das", "Subject": "Maths", "Allowed Classes": "All"}],\n'
+                            '  "fixed_rules": ["The very 1st period on Monday for every section must be reserved as the Class Teacher period", "Teacher should not teach 3 consecutive periods"]\n'
+                            '}\n\n'
                             "Text Chunk:\n" + part
                         )
                         
@@ -208,7 +214,6 @@ with tab5:
                                     cls = t.get("Allowed Classes", "").strip()
                                     
                                     if name in teacher_map:
-                                        # Merge subjects and classes if teacher comes up in multiple chunks
                                         existing_subs = set([s.strip() for s in teacher_map[name]["Subject"].split(",")])
                                         new_subs = set([s.strip() for s in sub.split(",")])
                                         teacher_map[name]["Subject"] = ", ".join(existing_subs.union(new_subs))
@@ -222,7 +227,7 @@ with tab5:
                                     else:
                                         teacher_map[name] = t
                             
-                            time_module.sleep(2) # Safe 2-sec wait between sync requests
+                            time_module.sleep(2) 
                         except Exception as e:
                             continue
                     
@@ -237,8 +242,14 @@ with tab5:
                     if teacher_map:
                         st.session_state.teachers_df = pd.DataFrame(list(teacher_map.values()))
                         
+                    # Remove duplicate rules!
                     if all_rules:
-                        st.session_state.fixed_rules = all_rules
+                        # Convert to string if they are dictionaries, otherwise just deduplicate strings
+                        cleaned_rules = []
+                        for r in all_rules:
+                            rule_text = r.get("rule", r) if isinstance(r, dict) else r
+                            cleaned_rules.append(str(rule_text))
+                        st.session_state.fixed_rules = list(set(cleaned_rules))
                         
                     st.success("✅ Master Sync Done! Saare rules aur teachers save ho gaye hain. Ab Generate dabayein.")
                     st.rerun()
@@ -255,7 +266,6 @@ with tab5:
                 break_at = st.session_state.break_at
                 fixed_rules = st.session_state.fixed_rules
                 
-                # Rule 1 & 2: Weekly System & Saturday Half-Day
                 days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
                 period_labels = []
                 valid_periods = []
@@ -280,7 +290,6 @@ with tab5:
                             
                 initial_busy_teachers = {i: set() for i in range(len(period_labels))}
                 
-                # SANDEEP SIR'S MASTER FIX: MULTIPLY SUBJECT BY WEEKLY FREQUENCY (6 Days = 6 classes)
                 class_requirements = {c: [] for c in classes_list}
                 for t in teachers_list:
                     t_name = t.get("Teacher Name", "")
@@ -291,11 +300,9 @@ with tab5:
                     for c in allowed_classes:
                         if c in classes_list:
                             for sub in [s.strip() for s in t_sub_raw.split(",")]:
-                                # The Fix: Schedule this subject for every working day (e.g., 6 classes a week!)
                                 for _ in range(working_days):
                                     class_requirements[c].append((t_name, sub))
 
-                # Rule 4: Contradiction Check (Only if load > total_weekly_periods)
                 teacher_global_load = {}
                 for c in classes_list:
                     for (t_name, sub) in class_requirements[c]:
@@ -311,11 +318,9 @@ with tab5:
                     for err in sanity_errors: st.write(f"- {err}")
                     st.warning("Engine timetable banane ki koshish kar raha hai, par overriding periods ko neglect karna pad sakta hai!")
 
-                # Rule 3: No Padding Spam, ONLY Library (Self-Study)
                 for c in classes_list:
-                    # Truncate safely if too many classes assigned
                     if len(class_requirements[c]) > total_weekly_periods:
-                        random.shuffle(class_requirements[c]) # Shuffle to drop random extra classes rather than just the last subjects
+                        random.shuffle(class_requirements[c]) 
                         class_requirements[c] = class_requirements[c][:total_weekly_periods]
                         
                     while len(class_requirements[c]) < total_weekly_periods:
@@ -346,7 +351,6 @@ with tab5:
                     valid_reqs = []
                     seen_reqs = set()
                     for req in custom_reqs[c]:
-                        # Prevent duplicate checks for same teacher-subject combo in this exact slot
                         if req not in seen_reqs: 
                             seen_reqs.add(req)
                             if req[0] not in custom_busy[p_idx] or req[0] == "Self-Study":
@@ -362,7 +366,6 @@ with tab5:
                         
                         if solve_custom(next_p_idx, next_c_idx): return True
                         
-                        # Backtrack
                         custom_timetable[c][p_idx] = "Free"
                         if t_name != "Self-Study": custom_busy[p_idx].remove(t_name)
                         custom_reqs[c].append(req) 
