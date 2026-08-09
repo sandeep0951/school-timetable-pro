@@ -23,12 +23,12 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Dynamic Rules Edition)")
+st.title("🏫 Advanced Timetable Pro (Dynamic Prompt Edition)")
 
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "working_days" not in st.session_state: st.session_state.working_days = 6
 if "break_at" not in st.session_state: st.session_state.break_at = 4
-# THE FIX: Added a dynamic variable for Saturday Half Day
+# Flexible logic strictly driven by prompt data
 if "saturday_half_day" not in st.session_state: st.session_state.saturday_half_day = False 
 
 if "periods_timing_df" not in st.session_state:
@@ -56,8 +56,6 @@ with tab1:
         st.session_state.working_days = st.number_input("Working Days per Week", min_value=1, max_value=7, value=int(st.session_state.working_days))
         st.session_state.periods_per_day = st.number_input("Periods per Day", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
         st.session_state.break_at = st.number_input("Lunch Break AFTER period?", min_value=1, max_value=15, value=int(st.session_state.break_at))
-        # UI Toggle for Half Day
-        st.session_state.saturday_half_day = st.checkbox("Is Saturday a Half-Day (4 Periods only)?", value=st.session_state.saturday_half_day)
     with col2:
         st.session_state.periods_timing_df = st.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
 
@@ -177,14 +175,15 @@ with tab5:
                         st.toast(f"Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
                         
                         extraction_prompt = (
-                            "Carefully read this text chunk. Extract ALL teacher names, subjects, classes, working days, periods, rules, AND explicitly check if Saturday is mentioned as a half-day.\n"
+                            "Carefully read this text chunk. Extract ALL teacher names, subjects, classes, working days, periods, rules.\n"
+                            'Also explicitly check if Saturday (or any other day) is mentioned as a half-day. Do NOT assume it is a half-day unless the text says so.\n'
                             'Also determine "Periods/Week (Per Class)" for teachers if mentioned.\n'
                             'Format EXACTLY like this JSON:\n'
                             '{\n'
                             '  "working_days": 6,\n'
                             '  "periods_per_day": 8,\n'
                             '  "break_at": 4,\n'
-                            '  "saturday_half_day": true,\n'
+                            '  "saturday_half_day": false,\n'
                             '  "classes": ["1st A", "1st B"],\n'
                             '  "teachers": [{"Teacher Name": "Mr. Rohan Das", "Subject": "Maths", "Allowed Classes": "All", "Periods/Week (Per Class)": 6}],\n'
                             '  "fixed_rules": ["The very 1st period on Monday for every section must be reserved as the Class Teacher period"]\n'
@@ -213,7 +212,7 @@ with tab5:
                             if part_data.get("periods_per_day"): master_periods_per_day = int(part_data["periods_per_day"])
                             if part_data.get("break_at"): master_break_at = int(part_data["break_at"])
                             
-                            # THE FIX: Safely parse saturday half day boolean
+                            # Flexible logic driven strictly by user data
                             if "saturday_half_day" in part_data:
                                 if str(part_data["saturday_half_day"]).lower() == "true":
                                     master_saturday_half_day = True
@@ -228,7 +227,7 @@ with tab5:
                                     name = t.get("Teacher Name", "Unknown").strip()
                                     sub = t.get("Subject", "").strip()
                                     cls = t.get("Allowed Classes", "").strip()
-                                    p_week = t.get("Periods/Week (Per Class)", 6) # Default 6, flexible for engine
+                                    p_week = t.get("Periods/Week (Per Class)", master_working_days) 
                                     
                                     if name in teacher_map:
                                         existing_subs = set([s.strip() for s in teacher_map[name]["Subject"].split(",")])
@@ -294,7 +293,7 @@ with tab5:
                 for d in range(working_days):
                     day_name = days_str[d]
                     
-                    # THE FIX: Dynamic period generation based on prompt rules
+                    # Engine follows the dynamic rule explicitly detected from user prompt
                     if day_name.lower() == "saturday" and is_sat_half:
                         current_day_periods = 4
                     else:
@@ -305,7 +304,6 @@ with tab5:
                         period_labels.append(f"{day_name} - P{i}")
                         valid_periods.append(global_p_idx)
                         
-                        # Only add lunch if it's not a half day
                         if i == break_at and not (day_name.lower() == "saturday" and is_sat_half): 
                             period_labels.append(f"{day_name} - LUNCH")
                 
@@ -323,7 +321,6 @@ with tab5:
                     t_sub_raw = str(t.get("Subject", ""))
                     t_allowed_str = str(t.get("Allowed Classes", "")).strip()
                     
-                    # Ensure Period/Week isn't larger than total weekly periods
                     try:
                         p_per_class = int(t.get("Periods/Week (Per Class)", working_days))
                     except:
