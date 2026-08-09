@@ -24,56 +24,75 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (True Rule-Engine Edition)")
+st.title("🏫 Advanced Timetable Pro (Sandeep Sir's Architecture)")
 
-if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
+# ================= STATE INITIALIZATION =================
+# TAB 1 States
 if "working_days" not in st.session_state: st.session_state.working_days = 6
+if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "break_at" not in st.session_state: st.session_state.break_at = 4
 if "saturday_half_day" not in st.session_state: st.session_state.saturday_half_day = False 
-
 if "periods_timing_df" not in st.session_state:
     slots = [{"Slot": f"Period {i}", "Duration (Mins)": 40} for i in range(1, 9)]
     slots.insert(4, {"Slot": "LUNCH BREAK", "Duration (Mins)": 40})
     st.session_state.periods_timing_df = pd.DataFrame(slots)
 
+# TAB 2 States
 if "classes_df" not in st.session_state: 
-    st.session_state.classes_df = pd.DataFrame({"Class Name": ["1st A", "1st B", "6th A"]})
+    st.session_state.classes_df = pd.DataFrame({"Class Name": ["1st A", "1st B"]})
+
+# TAB 3 States
 if "teachers_df" not in st.session_state:
     st.session_state.teachers_df = pd.DataFrame({
-        "Teacher Name": ["Mr. Rohan Das", "Coach Ravi", "Mrs. Anita Sharma"],
-        "Subject": ["Maths", "Sports", "English"],
-        "Allowed Classes": ["All", "All", "1st A, 1st B"],
-        "Periods/Week (Per Class)": [6, 4, 6] 
+        "Teacher Name": ["Mr. Rohan Das", "Coach Ravi"],
+        "Subject": ["Maths", "Sports"],
+        "Allowed Classes": ["All", "All"],
+        "Periods/Week (Per Class)": [6, 4] 
     })
-if "fixed_rules" not in st.session_state: 
-    st.session_state.fixed_rules = []
 
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕒 1. Timings & Days", "🏫 2. Classes", "👨‍🏫 3. Teachers", "⚙️ 4. Rules", "🚀💬 5. AI Co-Pilot & Engine"])
+# TAB 4 States (Rules table)
+if "rules_df" not in st.session_state:
+    st.session_state.rules_df = pd.DataFrame({"Rule": []})
+
+
+# ================= UI TABS =================
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "🕒 1. Timings & Schedule", 
+    "🏫 2. Classes & Sections", 
+    "👨‍🏫 3. Teachers & Logic", 
+    "⚙️ 4. Rules", 
+    "🚀💬 5. Chat & Engine"
+])
 
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
-        st.session_state.working_days = st.number_input("Working Days per Week", min_value=1, max_value=7, value=int(st.session_state.working_days))
-        st.session_state.periods_per_day = st.number_input("Periods per Day", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
+        st.session_state.working_days = st.number_input("1. Schedule Weekly (Working Days)", min_value=1, max_value=7, value=int(st.session_state.working_days))
+        st.session_state.periods_per_day = st.number_input("2. Period Timing (Periods per Day)", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
         st.session_state.break_at = st.number_input("Lunch Break AFTER period?", min_value=1, max_value=15, value=int(st.session_state.break_at))
+        st.session_state.saturday_half_day = st.checkbox("4. Weekend Half Day (Saturday Half-Day)?", value=st.session_state.saturday_half_day)
     with col2:
+        st.markdown("**School Timing (Durations):**")
         st.session_state.periods_timing_df = st.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
 
 with tab2:
+    st.markdown("**1. Total Classes with Sections:**")
     st.session_state.classes_df = st.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
 
 with tab3:
+    st.markdown("**1, 2, 3, 4: Teachers Name, Subjects, Classes, and Weekly Logic (Periods/Week):**")
     st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
 
 with tab4:
-    st.json(st.session_state.fixed_rules)
+    st.markdown("**1. Rules from Prompt:**")
+    st.session_state.rules_df = st.data_editor(st.session_state.rules_df, num_rows="dynamic", use_container_width=True)
 
 with tab5:
     col_chat, col_engine = st.columns([4, 6], gap="large")
     
     with col_chat:
         col_c1, col_c2 = st.columns([7, 3])
-        with col_c1: st.subheader("💬 AI Co-Pilot")
+        with col_c1: st.subheader("💬 1. Chat Box")
         with col_c2:
             if st.button("🗑️ Clear Chat"):
                 del st.session_state["chat_messages"]
@@ -84,13 +103,13 @@ with tab5:
                 {
                     "role": "system", 
                     "content": (
-                        "You are a SILENT Data Collector. DO NOT summarize or output the extracted data in the chat.\n"
+                        "You are a SILENT Data Collector. DO NOT summarize.\n"
                         "When user pastes data parts, reply EXACTLY with: '✅ Data Part Received. Aage ka data bhejein, ya pura ho gaya ho toh DONE likhein.'\n"
                         "When user types 'DONE', reply EXACTLY with: '✅ Data Collection Complete! Kripya right side par Sync button dabayein.'\n"
                         "DO NOT write anything else."
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Apna data parts me bhejein. Main rules ko extract karke engine ko enforce karne ko kahunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Data parts me bhejein."}
             ]
 
         chat_container = st.container(height=550)
@@ -107,22 +126,19 @@ with tab5:
 
             if not client: st.error("❌ Groq API Key missing!")
             else:
-                with st.spinner("AI tukdo mein process kar raha hai (Bina ruke)..."):
+                with st.spinner("AI processing..."):
                     try:
                         chunk_size = 2500
                         prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
                         
                         final_ai_reply = ""
                         for c_idx, chunk_text in enumerate(prompt_chunks):
-                            if len(prompt_chunks) > 1:
-                                st.toast(f"⏳ Bada data hai! Chunk {c_idx+1}/{len(prompt_chunks)} bhej raha hai...")
-                            
                             messages_to_send = [
                                 st.session_state.chat_messages[0],
                                 {"role": "user", "content": f"Here is data: {chunk_text}"}
                             ]
                             
-                            for attempt in range(5):
+                            for attempt in range(3):
                                 try:
                                     completion = client.chat.completions.create(
                                         model="llama-3.1-8b-instant",  
@@ -130,19 +146,12 @@ with tab5:
                                         temperature=0.1,
                                         max_tokens=100
                                     )
-                                    resp_chunk = completion.choices[0].message.content
-                                    final_ai_reply = resp_chunk
+                                    final_ai_reply = completion.choices[0].message.content
                                     time_module.sleep(1)
                                     break
                                 except Exception as chunk_err:
-                                    err_msg = str(chunk_err).lower()
-                                    if "429" in err_msg or "rate limit" in err_msg or "413" in err_msg:
-                                        st.toast(f"⏳ API limit hit! 15 sec wait karke automatically resume kar raha hai... (Attempt {attempt+1})")
-                                        time_module.sleep(15)
-                                        continue
-                                    else:
-                                        final_ai_reply = f"[Error: {chunk_err}] "
-                                        break
+                                    time_module.sleep(15)
+                                    continue
                                         
                         with chat_container:
                             with st.chat_message("assistant"): st.markdown(final_ai_reply)
@@ -152,12 +161,13 @@ with tab5:
                         st.error(f"System Error: {e}")
 
     with col_engine:
-        st.subheader("⚙️ Action Center & Engine")
+        st.subheader("⚙️ Action Center")
         
-        if st.button("🔄 1. Sync AI Rules from Chat", use_container_width=True):
+        # SYNC BUTTON (Sare tabs prompt data se bharega)
+        if st.button("🔄 Sync Button (Extract Data)", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Master Memory mein Sync ho raha hai (Wait karein)..."):
+                with st.spinner("Extracting Data into Tabs..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
                     master_working_days = st.session_state.working_days
@@ -169,15 +179,13 @@ with tab5:
                     teacher_map = {}
                     
                     for idx, part in enumerate(user_msgs):
-                        if part.strip().lower() == "done" or len(part) < 10:
+                        if part.strip().lower() == "done" or len(part) < 5:
                             continue 
                             
                         st.toast(f"Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
                         
                         extraction_prompt = (
-                            "Carefully read this text chunk. Extract ALL teacher names, subjects, classes, working days, periods, rules.\n"
-                            'Explicitly check if Saturday (or any other day) is mentioned as a half-day.\n'
-                            'Also determine "Periods/Week (Per Class)" for teachers if mentioned.\n'
+                            "Carefully read this text chunk. Extract timing, classes, teachers (with Periods/Week logic), weekend half day info, AND ALL RULES.\n"
                             'Format EXACTLY like this JSON:\n'
                             '{\n'
                             '  "working_days": 6,\n'
@@ -186,7 +194,7 @@ with tab5:
                             '  "saturday_half_day": false,\n'
                             '  "classes": ["1st A", "1st B"],\n'
                             '  "teachers": [{"Teacher Name": "Mr. Rohan Das", "Subject": "Maths", "Allowed Classes": "All", "Periods/Week (Per Class)": 6}],\n'
-                            '  "fixed_rules": ["The very 1st period on Monday for every section must be reserved as the Class Teacher period", "Max 3 consecutive periods"]\n'
+                            '  "fixed_rules": ["1st period on Monday is Class Teacher period", "Teacher cannot teach more than 3 continuous periods"]\n'
                             '}\n\n'
                             "Text Chunk:\n" + part
                         )
@@ -197,7 +205,7 @@ with tab5:
                                 messages=[{"role": "user", "content": extraction_prompt}],
                                 temperature=0.1,
                                 response_format={"type": "json_object"},
-                                max_tokens=1500
+                                max_tokens=2000
                             )
                             raw_output = completion.choices[0].message.content
                             clean_output = raw_output.strip()
@@ -245,10 +253,11 @@ with tab5:
                                         t["Periods/Week (Per Class)"] = p_week
                                         teacher_map[name] = t
                             
-                            time_module.sleep(2) 
+                            time_module.sleep(1) 
                         except Exception as e:
                             continue
                     
+                    # 1. Update Tabs First (sare tabs prompt data se pehle bharega)
                     st.session_state.working_days = int(max(1, min(7, master_working_days)))
                     st.session_state.periods_per_day = int(max(1, min(20, master_periods_per_day)))
                     st.session_state.break_at = int(max(1, min(15, master_break_at)))
@@ -266,13 +275,15 @@ with tab5:
                         for r in all_rules:
                             rule_text = r.get("rule", r) if isinstance(r, dict) else r
                             cleaned_rules.append(str(rule_text))
-                        st.session_state.fixed_rules = list(set(cleaned_rules))
+                        st.session_state.rules_df = pd.DataFrame({"Rule": list(set(cleaned_rules))})
                         
-                    st.success("✅ Master Sync Done! Saare rules aur teachers save ho gaye hain. Ab Generate dabayein.")
+                    # 2. Confirmation after filling tabs
+                    st.success("✅ 2. Data Received and JSON successfully built! All Tabs updated. Now run the Engine.")
                     st.rerun()
 
         st.markdown("---")
-        if st.button("🚀 2. Run Weekly Engine & Generate", type="primary", use_container_width=True):
+        # RUN ENGINE BUTTON
+        if st.button("🚀 Run Timetable Engine", type="primary", use_container_width=True):
             with st.spinner("Applying Rules & Running Engine..."):
                 sys.setrecursionlimit(5000)
                 
@@ -281,11 +292,11 @@ with tab5:
                 periods_per_day = st.session_state.periods_per_day
                 working_days = st.session_state.working_days
                 break_at = st.session_state.break_at
-                fixed_rules = st.session_state.fixed_rules
+                fixed_rules = st.session_state.rules_df["Rule"].dropna().tolist()
                 is_sat_half = st.session_state.saturday_half_day
                 
-                # RULE PARSER: Interpret natural language rules for the engine
-                rule_max_consecutive = 10 # Default (no limit)
+                # Dynamic Rule Parser
+                rule_max_consecutive = 10 
                 for r in fixed_rules:
                     r_lower = r.lower()
                     if "consecutive" in r_lower or "continuous" in r_lower:
@@ -354,7 +365,7 @@ with tab5:
                 sanity_errors = []
                 for (t_name, load) in teacher_global_load.items():
                     if t_name not in ["Library Master", "Self-Study"] and load > total_weekly_periods:
-                        sanity_errors.append(f"Teacher '{t_name}' ko hafte ki {load} classes mili hain, par total periods {total_weekly_periods} hain. Isse clash hoga.")
+                        sanity_errors.append(f"Teacher '{t_name}' hafte ki {load} classes mili hain, par periods {total_weekly_periods} hain. Clash possible.")
                 
                 if sanity_errors:
                     st.error("🚨 WEEKLY DATA CONTRADICTIONS DETECTED:")
@@ -368,7 +379,7 @@ with tab5:
                     while len(class_requirements[c]) < total_weekly_periods:
                         class_requirements[c].append(("Self-Study", "Library"))
 
-                st.info(f"🔄 Running Python Engine for {working_days} Days (Max Consecutive Load Rule = {rule_max_consecutive})...")
+                st.info(f"🔄 Running Python Engine for {working_days} Days...")
                 
                 custom_timetable = copy.deepcopy(initial_timetable)
                 custom_busy = copy.deepcopy(initial_busy_teachers)
@@ -396,20 +407,16 @@ with tab5:
                         if req not in seen_reqs: 
                             seen_reqs.add(req)
                             if req[0] not in custom_busy[p_idx] or req[0] == "Self-Study":
-                                # RULE ENFORCEMENT: Check consecutive periods
+                                # Strict Rules logic Check
                                 t_name_check = req[0]
                                 if t_name_check != "Self-Study":
                                     consecutive = 0
-                                    # Look backward in same day
                                     for back_p in range(p_idx - 1, -1, -1):
-                                        if "LUNCH" in period_labels[back_p]:
-                                            break # Lunch resets consecutive limit
-                                        if t_name_check in custom_busy[back_p]:
-                                            consecutive += 1
-                                        else:
-                                            break
+                                        if "LUNCH" in period_labels[back_p]: break
+                                        if t_name_check in custom_busy[back_p]: consecutive += 1
+                                        else: break
                                     if consecutive >= rule_max_consecutive:
-                                        continue # Violates consecutive rule, skip this assignment
+                                        continue 
                                 
                                 valid_reqs.append(req)
                     
@@ -433,92 +440,7 @@ with tab5:
                 if custom_success:
                     df = pd.DataFrame(custom_timetable)
                     df.insert(0, "Day / Period", period_labels)
-                    st.success("✅ Tier 1 Success: Master Weekly Timetable generated perfectly with Custom Rules!")
+                    st.success("✅ Engine Success: Timetable Generated with Rules!")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ Custom Engine timed out. Rules too strict. Falling back to Tier 2 (Google OR-Tools)...")
-                    if not ORTOOLS_AVAILABLE:
-                        st.error("❌ Fallback Failed: Google 'ortools' is not installed.")
-                    else:
-                        ortools_timetable = copy.deepcopy(initial_timetable)
-                        ortools_reqs = copy.deepcopy(class_requirements)
-                        
-                        model = cp_model.CpModel()
-                        x = {} 
-                        for c in classes_list:
-                            x[c] = {}
-                            for p in valid_periods:
-                                x[c][p] = {}
-                                for r_idx in range(len(ortools_reqs[c])):
-                                    x[c][p][r_idx] = model.NewBoolVar(f'assign_{c}_{p}_{r_idx}')
-
-                        for c in classes_list:
-                            for p in valid_periods:
-                                model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(ortools_reqs[c]))])
-
-                        for c in classes_list:
-                            for r_idx in range(len(ortools_reqs[c])):
-                                model.AddExactlyOne([x[c][p][r_idx] for p in valid_periods])
-
-                        all_teachers = set()
-                        for c in classes_list:
-                            for (t_name, sub) in ortools_reqs[c]:
-                                if t_name != "Self-Study": all_teachers.add(t_name)
-
-                        for p in valid_periods:
-                            for teacher in all_teachers:
-                                teacher_assignments_in_period = []
-                                for c in classes_list:
-                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
-                                        if req[0] == teacher:
-                                            teacher_assignments_in_period.append(x[c][p][r_idx])
-                                if len(teacher_assignments_in_period) > 1:
-                                    model.AddAtMostOne(teacher_assignments_in_period)
-
-                        # RULE ENFORCEMENT OR-TOOLS: Max Consecutive Periods
-                        if rule_max_consecutive < len(valid_periods):
-                            day_wise_periods = {}
-                            for p_idx_label, label in enumerate(period_labels):
-                                if "LUNCH" not in label:
-                                    day = label.split(" - ")[0]
-                                    real_p = valid_periods[len([px for px in period_labels[:p_idx_label+1] if "LUNCH" not in px]) - 1]
-                                    if day not in day_wise_periods:
-                                        day_wise_periods[day] = []
-                                    day_wise_periods[day].append(real_p)
-                                    
-                            for teacher in all_teachers:
-                                for day, d_periods in day_wise_periods.items():
-                                    for start_idx in range(len(d_periods) - rule_max_consecutive):
-                                        window = d_periods[start_idx : start_idx + rule_max_consecutive + 1]
-                                        teacher_vars_in_window = []
-                                        for wp in window:
-                                            for c in classes_list:
-                                                for (r_idx, req) in enumerate(ortools_reqs[c]):
-                                                    if req[0] == teacher:
-                                                        teacher_vars_in_window.append(x[c][wp][r_idx])
-                                        if teacher_vars_in_window:
-                                            model.Add(sum(teacher_vars_in_window) <= rule_max_consecutive)
-
-                        solver = cp_model.CpSolver()
-                        solver.parameters.max_time_in_seconds = 30.0 
-                        status = solver.Solve(model)
-
-                        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-                            for c in classes_list:
-                                for p in valid_periods:
-                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
-                                        if solver.Value(x[c][p][r_idx]) == 1:
-                                            p_label_idx = -1
-                                            for (idx, label) in enumerate(period_labels):
-                                                if not "LUNCH" in label:
-                                                    p_label_idx += 1
-                                                    if p_label_idx == p - 1:
-                                                        ortools_timetable[c][idx] = f"{req[1]} ({req[0]})"
-                                                        break
-                                            
-                            df = pd.DataFrame(ortools_timetable)
-                            df.insert(0, "Day / Period", period_labels)
-                            st.success(f"✅ Tier 2 Success: Timetable generated with Rules via OR-Tools! (Status: {solver.StatusName(status)})")
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-                        else:
-                            st.error("❌ ABSOLUTE DEADLOCK! Engine could not place classes while following the strict rules.")
+                    st.warning("⚠️ Rules too strict. Engine timed out.")
