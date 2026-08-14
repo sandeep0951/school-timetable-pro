@@ -2,12 +2,15 @@ import streamlit as st
 import pandas as pd
 from datetime import datetime, time
 import time as time_module
-from groq import Groq
 import json
 import random
 import sys
 import copy
 import re
+
+# NAYE AI LIBRARIES
+from openai import OpenAI
+import anthropic
 
 # Attempt to import Google OR-Tools
 try:
@@ -18,13 +21,18 @@ except ImportError:
 
 st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
 
+# API Keys Setup
 try:
-    groq_api_key = st.secrets["GROQ_API_KEY"]
-    client = Groq(api_key=groq_api_key)
+    openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 except:
-    client = None
+    openai_client = None
 
-st.title("🏫 Advanced Timetable Pro (Smart Consultant & Fixed UI)")
+try:
+    anthropic_client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+except:
+    anthropic_client = None
+
+st.title("🏫 Advanced Timetable Pro (OpenAI + Claude Edition)")
 
 # ================= STATE INITIALIZATION =================
 # TAB 1 States
@@ -119,7 +127,6 @@ with tab5:
                 {"role": "assistant", "content": "Namaste Sandeep Sir! Main aapka Smart Assistant hoon. Kripya apna data bhejein, main Tab 1 se 4 tak sab check karunga aur errors point out karunga."}
             ]
 
-        # Chat display container
         chat_container = st.container(height=450)
         with chat_container:
             for message in st.session_state.chat_messages:
@@ -127,7 +134,6 @@ with tab5:
                     with st.chat_message(message["role"]):
                         st.markdown(message["content"])
 
-        # THE UI FIX: Fixed height text area inside a form to prevent infinite downwards expansion
         with st.form("chat_input_form", clear_on_submit=True):
             prompt = st.text_area("Apna data yahan paste karein (Fixed size box):", height=120)
             submit_chat = st.form_submit_button("Send 🚀")
@@ -137,9 +143,9 @@ with tab5:
             with chat_container:
                 with st.chat_message("user"): st.markdown(prompt)
 
-            if not client: st.error("❌ Groq API Key missing!")
+            if not openai_client: st.error("❌ OpenAI API Key missing!")
             else:
-                with st.spinner("AI is analyzing your data & rules..."):
+                with st.spinner("OpenAI is analyzing your data & rules..."):
                     try:
                         chunk_size = 2500
                         prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
@@ -153,8 +159,9 @@ with tab5:
                             
                             for attempt in range(3):
                                 try:
-                                    completion = client.chat.completions.create(
-                                        model="llama-3.3-70b-versatile",  
+                                    # MODEL 1: OPENAI (Chat & Analysis)
+                                    completion = openai_client.chat.completions.create(
+                                        model="gpt-4o-mini",  
                                         messages=messages_to_send,
                                         temperature=0.3,
                                         max_tokens=400
@@ -163,7 +170,7 @@ with tab5:
                                     time_module.sleep(1)
                                     break
                                 except Exception as chunk_err:
-                                    time_module.sleep(15)
+                                    time_module.sleep(5)
                                     continue
                                         
                         with chat_container:
@@ -178,9 +185,9 @@ with tab5:
         
         # SYNC BUTTON (Sare tabs prompt data se bharega)
         if st.button("🔄 Sync Button (Extract Data)", use_container_width=True):
-            if not client: st.error("Groq API Key missing!")
+            if not anthropic_client: st.error("Anthropic API Key missing!")
             else:
-                with st.spinner("Extracting Data into Tabs (Building JSON)..."):
+                with st.spinner("Claude 3.5 Sonnet is building JSON data..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
                     master_working_days = st.session_state.working_days
@@ -195,11 +202,11 @@ with tab5:
                         if part.strip().lower() == "done" or len(part) < 5:
                             continue 
                             
-                        st.toast(f"Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
+                        st.toast(f"Claude Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
                         
                         extraction_prompt = (
                             "Carefully read this text chunk. Extract timing, classes, teachers (with Periods/Week logic), weekend half day info, AND ALL RULES.\n"
-                            'Format EXACTLY like this JSON:\n'
+                            'Format EXACTLY like this JSON. Do not output anything else:\n'
                             '{\n'
                             '  "working_days": 6,\n'
                             '  "periods_per_day": 8,\n'
@@ -213,14 +220,18 @@ with tab5:
                         )
                         
                         try:
-                            completion = client.chat.completions.create(
-                                model="llama-3.1-8b-instant",  
-                                messages=[{"role": "user", "content": extraction_prompt}],
+                            # MODEL 2: ANTHROPIC CLAUDE 3.5 SONNET (Perfect JSON Extraction)
+                            response = anthropic_client.messages.create(
+                                model="claude-3-5-sonnet-20241022",
+                                max_tokens=2500,
                                 temperature=0.1,
-                                response_format={"type": "json_object"},
-                                max_tokens=2000
+                                system="You are an expert JSON data extractor. Output ONLY raw valid JSON.",
+                                messages=[
+                                    {"role": "user", "content": extraction_prompt}
+                                ]
                             )
-                            raw_output = completion.choices[0].message.content
+                            
+                            raw_output = response.content[0].text
                             clean_output = raw_output.strip()
                             bt = chr(96) * 3  
                             if clean_output.startswith(bt + "json"): clean_output = clean_output[7:]
@@ -270,7 +281,6 @@ with tab5:
                         except Exception as e:
                             continue
                     
-                    # 1. Update Tabs First (sare tabs prompt data se pehle bharega)
                     st.session_state.working_days = int(max(1, min(7, master_working_days)))
                     st.session_state.periods_per_day = int(max(1, min(20, master_periods_per_day)))
                     st.session_state.break_at = int(max(1, min(15, master_break_at)))
@@ -290,7 +300,6 @@ with tab5:
                             cleaned_rules.append(str(rule_text))
                         st.session_state.rules_df = pd.DataFrame({"Rule": list(set(cleaned_rules))})
                         
-                    # 2. Confirmation after filling tabs
                     st.success("✅ 2. Data Received and JSON successfully built! All Tabs updated. Now run the Engine.")
                     st.rerun()
 
@@ -308,7 +317,6 @@ with tab5:
                 fixed_rules = st.session_state.rules_df["Rule"].dropna().tolist()
                 is_sat_half = st.session_state.saturday_half_day
                 
-                # Dynamic Rule Parser
                 rule_max_consecutive = 10 
                 for r in fixed_rules:
                     r_lower = r.lower()
@@ -420,7 +428,6 @@ with tab5:
                         if req not in seen_reqs: 
                             seen_reqs.add(req)
                             if req[0] not in custom_busy[p_idx] or req[0] == "Self-Study":
-                                # Strict Rules logic Check
                                 t_name_check = req[0]
                                 if t_name_check != "Self-Study":
                                     consecutive = 0
@@ -495,7 +502,6 @@ with tab5:
                                 if len(teacher_assignments_in_period) > 1:
                                     model.AddAtMostOne(teacher_assignments_in_period)
 
-                        # Rule Enforcement for OR Tools
                         if rule_max_consecutive < len(valid_periods):
                             day_wise_periods = {}
                             for p_idx_label, label in enumerate(period_labels):
