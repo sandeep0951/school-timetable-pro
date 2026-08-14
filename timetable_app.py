@@ -24,7 +24,7 @@ try:
 except:
     client = None
 
-st.title("🏫 Advanced Timetable Pro (Sandeep Sir's Architecture)")
+st.title("🏫 Advanced Timetable Pro (Smart Consultant & Fixed UI)")
 
 # ================= STATE INITIALIZATION =================
 # TAB 1 States
@@ -103,30 +103,43 @@ with tab5:
                 {
                     "role": "system", 
                     "content": (
-                        "You are a SILENT Data Collector. DO NOT summarize.\n"
-                        "When user pastes data parts, reply EXACTLY with: '✅ Data Part Received. Aage ka data bhejein, ya pura ho gaya ho toh DONE likhein.'\n"
-                        "When user types 'DONE', reply EXACTLY with: '✅ Data Collection Complete! Kripya right side par Sync button dabayein.'\n"
-                        "DO NOT write anything else."
+                        "You are an Expert Timetable Consultant. Your goal is to collect data for 4 Tabs:\n"
+                        "Tab 1: Timings (Working days, Periods/day, Break, Weekend rules)\n"
+                        "Tab 2: Classes & Sections\n"
+                        "Tab 3: Teachers (Name, Subject, Classes, Periods/Week per class)\n"
+                        "Tab 4: Rules (Limits, class teacher periods, etc.)\n\n"
+                        "When user sends data:\n"
+                        "1. Identify which Tab's info was provided.\n"
+                        "2. Point out what is STILL MISSING.\n"
+                        "3. CRITICAL: Analyze the rules and data. If a teacher's workload is practically impossible or contradicts rules, point it out!\n"
+                        "4. Do NOT generate JSON in chat. Just analyze and collect.\n"
+                        "5. Once user says 'DONE' or confirms everything is provided, reply EXACTLY: '✅ All data verified! Kripya right side par Sync Button dabayein.'"
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Data parts me bhejein."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Main aapka Smart Assistant hoon. Kripya apna data bhejein, main Tab 1 se 4 tak sab check karunga aur errors point out karunga."}
             ]
 
-        chat_container = st.container(height=550)
+        # Chat display container
+        chat_container = st.container(height=450)
         with chat_container:
             for message in st.session_state.chat_messages:
                 if message["role"] != "system":
                     with st.chat_message(message["role"]):
                         st.markdown(message["content"])
 
-        if prompt := st.chat_input("Apna instruction yahan likhein..."):
+        # THE UI FIX: Fixed height text area inside a form to prevent infinite downwards expansion
+        with st.form("chat_input_form", clear_on_submit=True):
+            prompt = st.text_area("Apna data yahan paste karein (Fixed size box):", height=120)
+            submit_chat = st.form_submit_button("Send 🚀")
+
+        if submit_chat and prompt:
             st.session_state.chat_messages.append({"role": "user", "content": prompt})
             with chat_container:
                 with st.chat_message("user"): st.markdown(prompt)
 
             if not client: st.error("❌ Groq API Key missing!")
             else:
-                with st.spinner("AI processing..."):
+                with st.spinner("AI is analyzing your data & rules..."):
                     try:
                         chunk_size = 2500
                         prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
@@ -135,7 +148,7 @@ with tab5:
                         for c_idx, chunk_text in enumerate(prompt_chunks):
                             messages_to_send = [
                                 st.session_state.chat_messages[0],
-                                {"role": "user", "content": f"Here is data: {chunk_text}"}
+                                {"role": "user", "content": f"[Data Part {c_idx+1}/{len(prompt_chunks)}]: {chunk_text}\n\nAnalyze this part based on your system instructions."}
                             ]
                             
                             for attempt in range(3):
@@ -143,10 +156,10 @@ with tab5:
                                     completion = client.chat.completions.create(
                                         model="llama-3.1-8b-instant",  
                                         messages=messages_to_send,
-                                        temperature=0.1,
-                                        max_tokens=100
+                                        temperature=0.3,
+                                        max_tokens=400
                                     )
-                                    final_ai_reply = completion.choices[0].message.content
+                                    final_ai_reply += completion.choices[0].message.content + "\n\n"
                                     time_module.sleep(1)
                                     break
                                 except Exception as chunk_err:
@@ -154,8 +167,8 @@ with tab5:
                                     continue
                                         
                         with chat_container:
-                            with st.chat_message("assistant"): st.markdown(final_ai_reply)
-                        st.session_state.chat_messages.append({"role": "assistant", "content": final_ai_reply})
+                            with st.chat_message("assistant"): st.markdown(final_ai_reply.strip())
+                        st.session_state.chat_messages.append({"role": "assistant", "content": final_ai_reply.strip()})
                         st.rerun()
                     except Exception as e:
                         st.error(f"System Error: {e}")
@@ -167,7 +180,7 @@ with tab5:
         if st.button("🔄 Sync Button (Extract Data)", use_container_width=True):
             if not client: st.error("Groq API Key missing!")
             else:
-                with st.spinner("Extracting Data into Tabs..."):
+                with st.spinner("Extracting Data into Tabs (Building JSON)..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
                     master_working_days = st.session_state.working_days
@@ -443,4 +456,89 @@ with tab5:
                     st.success("✅ Engine Success: Timetable Generated with Rules!")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ Rules too strict. Engine timed out.")
+                    st.warning("⚠️ Rules too strict. Custom Engine timed out. Falling back to Tier 2 (Google OR-Tools)...")
+                    if not ORTOOLS_AVAILABLE:
+                        st.error("❌ Fallback Failed: Google 'ortools' is not installed.")
+                    else:
+                        ortools_timetable = copy.deepcopy(initial_timetable)
+                        ortools_reqs = copy.deepcopy(class_requirements)
+                        
+                        model = cp_model.CpModel()
+                        x = {} 
+                        for c in classes_list:
+                            x[c] = {}
+                            for p in valid_periods:
+                                x[c][p] = {}
+                                for r_idx in range(len(ortools_reqs[c])):
+                                    x[c][p][r_idx] = model.NewBoolVar(f'assign_{c}_{p}_{r_idx}')
+
+                        for c in classes_list:
+                            for p in valid_periods:
+                                model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(ortools_reqs[c]))])
+
+                        for c in classes_list:
+                            for r_idx in range(len(ortools_reqs[c])):
+                                model.AddExactlyOne([x[c][p][r_idx] for p in valid_periods])
+
+                        all_teachers = set()
+                        for c in classes_list:
+                            for (t_name, sub) in ortools_reqs[c]:
+                                if t_name != "Self-Study": all_teachers.add(t_name)
+
+                        for p in valid_periods:
+                            for teacher in all_teachers:
+                                teacher_assignments_in_period = []
+                                for c in classes_list:
+                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                        if req[0] == teacher:
+                                            teacher_assignments_in_period.append(x[c][p][r_idx])
+                                if len(teacher_assignments_in_period) > 1:
+                                    model.AddAtMostOne(teacher_assignments_in_period)
+
+                        # Rule Enforcement for OR Tools
+                        if rule_max_consecutive < len(valid_periods):
+                            day_wise_periods = {}
+                            for p_idx_label, label in enumerate(period_labels):
+                                if "LUNCH" not in label:
+                                    day = label.split(" - ")[0]
+                                    real_p = valid_periods[len([px for px in period_labels[:p_idx_label+1] if "LUNCH" not in px]) - 1]
+                                    if day not in day_wise_periods:
+                                        day_wise_periods[day] = []
+                                    day_wise_periods[day].append(real_p)
+                                    
+                            for teacher in all_teachers:
+                                for day, d_periods in day_wise_periods.items():
+                                    for start_idx in range(len(d_periods) - rule_max_consecutive):
+                                        window = d_periods[start_idx : start_idx + rule_max_consecutive + 1]
+                                        teacher_vars_in_window = []
+                                        for wp in window:
+                                            for c in classes_list:
+                                                for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                                    if req[0] == teacher:
+                                                        teacher_vars_in_window.append(x[c][wp][r_idx])
+                                        if teacher_vars_in_window:
+                                            model.Add(sum(teacher_vars_in_window) <= rule_max_consecutive)
+
+                        solver = cp_model.CpSolver()
+                        solver.parameters.max_time_in_seconds = 30.0 
+                        status = solver.Solve(model)
+
+                        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+                            for c in classes_list:
+                                for p in valid_periods:
+                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                        if solver.Value(x[c][p][r_idx]) == 1:
+                                            p_label_idx = -1
+                                            for (idx, label) in enumerate(period_labels):
+                                                if not "LUNCH" in label:
+                                                    p_label_idx += 1
+                                                    if p_label_idx == p - 1:
+                                                        ortools_timetable[c][idx] = f"{req[1]} ({req[0]})"
+                                                        break
+                                            
+                            df = pd.DataFrame(ortools_timetable)
+                            df.insert(0, "Day / Period", period_labels)
+                            st.success(f"✅ Tier 2 Success: Timetable generated via OR-Tools! (Status: {solver.StatusName(status)})")
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+                        else:
+                            st.error("❌ ABSOLUTE DEADLOCK! Engine failed.")
