@@ -8,9 +8,8 @@ import sys
 import copy
 import re
 
-# NAYE LIBRARIES (Nvidia & Gemini)
+# NAYE LIBRARIES (Sirf OpenAI required for Nvidia NIM)
 from openai import OpenAI
-import google.generativeai as genai
 
 # Attempt to import Google OR-Tools
 try:
@@ -24,17 +23,16 @@ st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
 # ================= SECRETS BYPASS (SIDEBAR) =================
 with st.sidebar:
     st.header("🔑 API Keys Setup")
-    st.markdown("Streamlit 'Secrets' error se bachne ke liye apni keys yahan dalein:")
+    st.markdown("Gemini hat gaya! Ab poori app **Nemotron 550B** par chalegi.")
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
-    gemini_api_key = st.text_input("Gemini API Key (AIza...)", type="password")
-    st.info("🛡️ Yeh keys safe hain aur save nahi hongi. App refresh hone par inko wapas dalna padega.")
+    st.info("🛡️ Yeh key safe hai aur GitHub par save nahi hogi. App refresh hone par isko wapas dalna padega.")
 
 # ================= API CLIENT SETUP =================
 # 1. Nvidia NIM (Nemotron 550B)
 try:
     if nvidia_api_key:
         nvidia_client = OpenAI(
-            base_url="[https://integrate.api.nvidia.com/v1](https://integrate.api.nvidia.com/v1)",
+            base_url="https://integrate.api.nvidia.com/v1",
             api_key=nvidia_api_key
         )
     else:
@@ -42,18 +40,7 @@ try:
 except:
     nvidia_client = None
 
-# 2. Google Gemini 1.5 Pro
-try:
-    if gemini_api_key:
-        genai.configure(api_key=gemini_api_key)
-        gemini_model = genai.GenerativeModel('gemini-1.5-pro')
-    else:
-        gemini_model = None
-except:
-    gemini_model = None
-
-
-st.title("🏫 Advanced Timetable Pro (Nemotron 550B + Gemini Pro)")
+st.title("🏫 Advanced Timetable Pro (Nemotron 550B Solo Edition)")
 
 # ================= STATE INITIALIZATION =================
 # TAB 1 States
@@ -203,11 +190,11 @@ with tab5:
     with col_engine:
         st.subheader("⚙️ Action Center")
         
-        # SYNC BUTTON
+        # SYNC BUTTON (Ab yeh bhi Nemotron se JSON banayega)
         if st.button("🔄 Sync Button (Extract Data)", use_container_width=True):
-            if not gemini_model: st.error("Gemini API Key missing! Kripya Left Sidebar mein key dalein.")
+            if not nvidia_client: st.error("Nvidia API Key missing! Kripya Left Sidebar mein key dalein.")
             else:
-                with st.spinner("Gemini 1.5 Pro is building strictly formatted JSON..."):
+                with st.spinner("Nemotron 550B is building strictly formatted JSON..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
                     master_working_days = st.session_state.working_days
@@ -222,11 +209,11 @@ with tab5:
                         if part.strip().lower() == "done" or len(part) < 5:
                             continue 
                             
-                        st.toast(f"Gemini Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
+                        st.toast(f"Nemotron Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
                         
                         extraction_prompt = (
-                            "Carefully read this text chunk. Extract timing, classes, teachers (with Periods/Week logic), weekend half day info, AND ALL RULES.\n"
-                            'Format EXACTLY like this JSON schema. Do not include markdown tags like ```json.\n'
+                            "You are a strict JSON data extractor. Read this text chunk carefully and extract timing, classes, teachers (with Periods/Week logic), weekend half day info, AND ALL RULES.\n"
+                            'Format EXACTLY like this JSON schema. OUTPUT ONLY RAW JSON without any markdown or conversational text.\n'
                             '{\n'
                             '  "working_days": 6,\n'
                             '  "periods_per_day": 8,\n'
@@ -240,18 +227,18 @@ with tab5:
                         )
                         
                         try:
-                            response = gemini_model.generate_content(
-                                extraction_prompt,
-                                generation_config=genai.GenerationConfig(
-                                    response_mime_type="application/json",
-                                    temperature=0.1
-                                )
+                            # Yahan Gemini ko hatakar Nemotron lagaya gaya hai
+                            response = nvidia_client.chat.completions.create(
+                                model="NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
+                                messages=[{"role": "user", "content": extraction_prompt}],
+                                temperature=0.1,
+                                max_tokens=2000
                             )
                             
-                            raw_output = response.text
+                            raw_output = response.choices[0].message.content
                             clean_output = raw_output.strip()
                             
-                            # MARKDOWN CLEANER (Ye fail hone se bachayega)
+                            # MARKDOWN CLEANER (Ye Nemotron ke extra text ko saaf karega)
                             if clean_output.startswith("```json"):
                                 clean_output = clean_output[7:]
                             elif clean_output.startswith("```"):
@@ -302,9 +289,8 @@ with tab5:
                             
                             time_module.sleep(2) 
                         except Exception as e:
-                            # YAHAN ERROR DIKHEGA AB CHHUPEGA NAHI
                             st.error(f"❌ DATA SYNC ERROR: {e}")
-                            st.info(f"Raw Output form Gemini was: {clean_output}")
+                            st.info(f"Raw Output form Nemotron was: {clean_output}")
                             continue
                     
                     if not teacher_map:
@@ -329,7 +315,7 @@ with tab5:
                                 cleaned_rules.append(str(rule_text))
                             st.session_state.rules_df = pd.DataFrame({"Rule": list(set(cleaned_rules))})
                             
-                        st.success("✅ 2. Data Received and JSON successfully built! All Tabs updated. Now run the Engine.")
+                        st.success("✅ 2. Data Received and JSON successfully built via Nemotron! All Tabs updated. Now run the Engine.")
                         st.rerun()
 
         st.markdown("---")
@@ -427,7 +413,6 @@ with tab5:
                         class_requirements[c] = class_requirements[c][:total_weekly_periods]
                         
                     while len(class_requirements[c]) < total_weekly_periods:
-                        # AGAR LIBRARY NAHI CHAHIYE TOH "FREE PERIOD" AAYEGA
                         class_requirements[c].append(("Free Period", ""))
 
                 st.info(f"🔄 Running Python Engine for {working_days} Days...")
