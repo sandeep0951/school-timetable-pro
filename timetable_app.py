@@ -21,20 +21,34 @@ except ImportError:
 
 st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
 
+# ================= SECRETS BYPASS (SIDEBAR) =================
+with st.sidebar:
+    st.header("🔑 API Keys Setup")
+    st.markdown("Streamlit 'Secrets' error se bachne ke liye apni keys yahan dalein:")
+    nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
+    gemini_api_key = st.text_input("Gemini API Key (AIza...)", type="password")
+    st.info("🛡️ Yeh keys safe hain aur save nahi hongi. App refresh hone par inko wapas dalna padega.")
+
 # ================= API CLIENT SETUP =================
-# 1. Nvidia NIM (Nemotron 550B) - Uses OpenAI library structure
+# 1. Nvidia NIM (Nemotron 550B)
 try:
-    nvidia_client = OpenAI(
-        base_url="https://integrate.api.nvidia.com/v1",
-        api_key=st.secrets["NVIDIA_API_KEY"]
-    )
+    if nvidia_api_key:
+        nvidia_client = OpenAI(
+            base_url="https://integrate.api.nvidia.com/v1",
+            api_key=nvidia_api_key
+        )
+    else:
+        nvidia_client = None
 except:
     nvidia_client = None
 
 # 2. Google Gemini 1.5 Pro
 try:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
-    gemini_model = genai.GenerativeModel('gemini-1.5-pro')
+    if gemini_api_key:
+        genai.configure(api_key=gemini_api_key)
+        gemini_model = genai.GenerativeModel('gemini-1.5-pro')
+    else:
+        gemini_model = None
 except:
     gemini_model = None
 
@@ -150,7 +164,7 @@ with tab5:
             with chat_container:
                 with st.chat_message("user"): st.markdown(prompt)
 
-            if not nvidia_client: st.error("❌ Nvidia API Key missing!")
+            if not nvidia_client: st.error("❌ Nvidia API Key missing! Kripya Left Sidebar mein key dalein.")
             else:
                 with st.spinner("Nemotron 550B is analyzing your logic..."):
                     try:
@@ -166,7 +180,6 @@ with tab5:
                             
                             for attempt in range(3):
                                 try:
-                                    # MODEL 1: NVIDIA Nemotron 550B
                                     completion = nvidia_client.chat.completions.create(
                                         model="NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",  
                                         messages=messages_to_send,
@@ -190,9 +203,9 @@ with tab5:
     with col_engine:
         st.subheader("⚙️ Action Center")
         
-        # SYNC BUTTON (Sare tabs prompt data se bharega)
+        # SYNC BUTTON
         if st.button("🔄 Sync Button (Extract Data)", use_container_width=True):
-            if not gemini_model: st.error("Gemini API Key missing!")
+            if not gemini_model: st.error("Gemini API Key missing! Kripya Left Sidebar mein key dalein.")
             else:
                 with st.spinner("Gemini 1.5 Pro is building strictly formatted JSON..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
@@ -227,7 +240,6 @@ with tab5:
                         )
                         
                         try:
-                            # MODEL 2: GOOGLE GEMINI 1.5 PRO (Strict JSON Mode)
                             response = gemini_model.generate_content(
                                 extraction_prompt,
                                 generation_config=genai.GenerationConfig(
