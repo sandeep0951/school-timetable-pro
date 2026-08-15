@@ -22,7 +22,7 @@ except ImportError:
 st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
 
 # ================= API CLIENT SETUP =================
-# 1. Nvidia NIM (Llama 405B) - Uses OpenAI library structure
+# 1. Nvidia NIM (Nemotron 550B) - Uses OpenAI library structure
 try:
     nvidia_client = OpenAI(
         base_url="https://integrate.api.nvidia.com/v1",
@@ -39,7 +39,7 @@ except:
     gemini_model = None
 
 
-st.title("🏫 Advanced Timetable Pro (Llama 405B + Gemini Pro)")
+st.title("🏫 Advanced Timetable Pro (Nemotron 550B + Gemini Pro)")
 
 # ================= STATE INITIALIZATION =================
 # TAB 1 States
@@ -131,7 +131,7 @@ with tab5:
                         "5. Once user says 'DONE' or confirms everything is provided, reply EXACTLY: '✅ All data verified! Kripya right side par Sync Button dabayein.'"
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Main Nvidia Llama 405B hoon. Kripya apna data bhejein, main analyze karunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Main Nvidia Nemotron 550B hoon. Kripya apna data bhejein, main analyze karunga."}
             ]
 
         chat_container = st.container(height=450)
@@ -152,7 +152,7 @@ with tab5:
 
             if not nvidia_client: st.error("❌ Nvidia API Key missing!")
             else:
-                with st.spinner("Llama 405B is analyzing your logic..."):
+                with st.spinner("Nemotron 550B is analyzing your logic..."):
                     try:
                         chunk_size = 2500
                         prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
@@ -166,9 +166,9 @@ with tab5:
                             
                             for attempt in range(3):
                                 try:
-                                    # MODEL 1: NVIDIA Llama 3.1 405B
+                                    # MODEL 1: NVIDIA Nemotron 550B
                                     completion = nvidia_client.chat.completions.create(
-                                        model="meta/llama-3.1-405b-instruct",  
+                                        model="NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",  
                                         messages=messages_to_send,
                                         temperature=0.2,
                                         max_tokens=500
