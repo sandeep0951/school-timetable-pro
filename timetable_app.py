@@ -34,7 +34,7 @@ with st.sidebar:
 try:
     if nvidia_api_key:
         nvidia_client = OpenAI(
-            base_url="https://integrate.api.nvidia.com/v1",
+            base_url="[https://integrate.api.nvidia.com/v1](https://integrate.api.nvidia.com/v1)",
             api_key=nvidia_api_key
         )
     else:
@@ -250,6 +250,17 @@ with tab5:
                             
                             raw_output = response.text
                             clean_output = raw_output.strip()
+                            
+                            # MARKDOWN CLEANER (Ye fail hone se bachayega)
+                            if clean_output.startswith("```json"):
+                                clean_output = clean_output[7:]
+                            elif clean_output.startswith("```"):
+                                clean_output = clean_output[3:]
+                            if clean_output.endswith("```"):
+                                clean_output = clean_output[:-3]
+                                
+                            clean_output = clean_output.strip()
+                            
                             part_data = json.loads(clean_output)
                             
                             if part_data.get("working_days"): master_working_days = int(part_data["working_days"])
@@ -291,29 +302,35 @@ with tab5:
                             
                             time_module.sleep(2) 
                         except Exception as e:
+                            # YAHAN ERROR DIKHEGA AB CHHUPEGA NAHI
+                            st.error(f"❌ DATA SYNC ERROR: {e}")
+                            st.info(f"Raw Output form Gemini was: {clean_output}")
                             continue
                     
-                    st.session_state.working_days = int(max(1, min(7, master_working_days)))
-                    st.session_state.periods_per_day = int(max(1, min(20, master_periods_per_day)))
-                    st.session_state.break_at = int(max(1, min(15, master_break_at)))
-                    st.session_state.saturday_half_day = master_saturday_half_day
-                    
-                    unique_classes = sorted(list(set(all_classes)))
-                    if unique_classes:
-                        st.session_state.classes_df = pd.DataFrame({"Class Name": unique_classes})
+                    if not teacher_map:
+                        st.warning("⚠️ Koi naya data Sync nahi hua! Kripya check karein upar error toh nahi aaya.")
+                    else:
+                        st.session_state.working_days = int(max(1, min(7, master_working_days)))
+                        st.session_state.periods_per_day = int(max(1, min(20, master_periods_per_day)))
+                        st.session_state.break_at = int(max(1, min(15, master_break_at)))
+                        st.session_state.saturday_half_day = master_saturday_half_day
                         
-                    if teacher_map:
-                        st.session_state.teachers_df = pd.DataFrame(list(teacher_map.values()))
-                        
-                    if all_rules:
-                        cleaned_rules = []
-                        for r in all_rules:
-                            rule_text = r.get("rule", r) if isinstance(r, dict) else r
-                            cleaned_rules.append(str(rule_text))
-                        st.session_state.rules_df = pd.DataFrame({"Rule": list(set(cleaned_rules))})
-                        
-                    st.success("✅ 2. Data Received and JSON successfully built! All Tabs updated. Now run the Engine.")
-                    st.rerun()
+                        unique_classes = sorted(list(set(all_classes)))
+                        if unique_classes:
+                            st.session_state.classes_df = pd.DataFrame({"Class Name": unique_classes})
+                            
+                        if teacher_map:
+                            st.session_state.teachers_df = pd.DataFrame(list(teacher_map.values()))
+                            
+                        if all_rules:
+                            cleaned_rules = []
+                            for r in all_rules:
+                                rule_text = r.get("rule", r) if isinstance(r, dict) else r
+                                cleaned_rules.append(str(rule_text))
+                            st.session_state.rules_df = pd.DataFrame({"Rule": list(set(cleaned_rules))})
+                            
+                        st.success("✅ 2. Data Received and JSON successfully built! All Tabs updated. Now run the Engine.")
+                        st.rerun()
 
         st.markdown("---")
         # RUN ENGINE BUTTON
@@ -410,7 +427,8 @@ with tab5:
                         class_requirements[c] = class_requirements[c][:total_weekly_periods]
                         
                     while len(class_requirements[c]) < total_weekly_periods:
-                        class_requirements[c].append(("Self-Study", "Library"))
+                        # AGAR LIBRARY NAHI CHAHIYE TOH "FREE PERIOD" AAYEGA
+                        class_requirements[c].append(("Free Period", ""))
 
                 st.info(f"🔄 Running Python Engine for {working_days} Days...")
                 
@@ -439,9 +457,9 @@ with tab5:
                     for req in custom_reqs[c]:
                         if req not in seen_reqs: 
                             seen_reqs.add(req)
-                            if req[0] not in custom_busy[p_idx] or req[0] == "Self-Study":
+                            if req[0] not in custom_busy[p_idx] or req[0] == "Free Period":
                                 t_name_check = req[0]
-                                if t_name_check != "Self-Study":
+                                if t_name_check != "Free Period":
                                     consecutive = 0
                                     for back_p in range(p_idx - 1, -1, -1):
                                         if "LUNCH" in period_labels[back_p]: break
@@ -456,14 +474,18 @@ with tab5:
                     
                     for req in valid_reqs:
                         t_name, sub = req
-                        custom_timetable[c][p_idx] = f"{sub} ({t_name})"
-                        custom_busy[p_idx].add(t_name)
+                        if t_name == "Free Period":
+                            custom_timetable[c][p_idx] = "Free Period"
+                        else:
+                            custom_timetable[c][p_idx] = f"{sub} ({t_name})"
+                            custom_busy[p_idx].add(t_name)
+                        
                         custom_reqs[c].remove(req) 
                         
                         if solve_custom(next_p_idx, next_c_idx): return True
                         
                         custom_timetable[c][p_idx] = "Free"
-                        if t_name != "Self-Study": custom_busy[p_idx].remove(t_name)
+                        if t_name != "Free Period": custom_busy[p_idx].remove(t_name)
                         custom_reqs[c].append(req) 
                     return False
 
@@ -502,7 +524,7 @@ with tab5:
                         all_teachers = set()
                         for c in classes_list:
                             for (t_name, sub) in ortools_reqs[c]:
-                                if t_name != "Self-Study": all_teachers.add(t_name)
+                                if t_name != "Free Period": all_teachers.add(t_name)
 
                         for p in valid_periods:
                             for teacher in all_teachers:
@@ -551,7 +573,10 @@ with tab5:
                                                 if not "LUNCH" in label:
                                                     p_label_idx += 1
                                                     if p_label_idx == p - 1:
-                                                        ortools_timetable[c][idx] = f"{req[1]} ({req[0]})"
+                                                        if req[0] == "Free Period":
+                                                            ortools_timetable[c][idx] = "Free Period"
+                                                        else:
+                                                            ortools_timetable[c][idx] = f"{req[1]} ({req[0]})"
                                                         break
                                             
                             df = pd.DataFrame(ortools_timetable)
