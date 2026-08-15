@@ -8,9 +8,9 @@ import sys
 import copy
 import re
 
-# NAYE AI LIBRARIES
+# NAYE LIBRARIES (Nvidia & Gemini)
 from openai import OpenAI
-import anthropic
+import google.generativeai as genai
 
 # Attempt to import Google OR-Tools
 try:
@@ -21,18 +21,25 @@ except ImportError:
 
 st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
 
-# API Keys Setup
+# ================= API CLIENT SETUP =================
+# 1. Nvidia NIM (Llama 405B) - Uses OpenAI library structure
 try:
-    openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    nvidia_client = OpenAI(
+        base_url="https://integrate.api.nvidia.com/v1",
+        api_key=st.secrets["NVIDIA_API_KEY"]
+    )
 except:
-    openai_client = None
+    nvidia_client = None
 
+# 2. Google Gemini 1.5 Pro
 try:
-    anthropic_client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    gemini_model = genai.GenerativeModel('gemini-1.5-pro')
 except:
-    anthropic_client = None
+    gemini_model = None
 
-st.title("🏫 Advanced Timetable Pro (OpenAI + Claude Edition)")
+
+st.title("🏫 Advanced Timetable Pro (Llama 405B + Gemini Pro)")
 
 # ================= STATE INITIALIZATION =================
 # TAB 1 States
@@ -124,7 +131,7 @@ with tab5:
                         "5. Once user says 'DONE' or confirms everything is provided, reply EXACTLY: '✅ All data verified! Kripya right side par Sync Button dabayein.'"
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Main aapka Smart Assistant hoon. Kripya apna data bhejein, main Tab 1 se 4 tak sab check karunga aur errors point out karunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Main Nvidia Llama 405B hoon. Kripya apna data bhejein, main analyze karunga."}
             ]
 
         chat_container = st.container(height=450)
@@ -143,9 +150,9 @@ with tab5:
             with chat_container:
                 with st.chat_message("user"): st.markdown(prompt)
 
-            if not openai_client: st.error("❌ OpenAI API Key missing!")
+            if not nvidia_client: st.error("❌ Nvidia API Key missing!")
             else:
-                with st.spinner("OpenAI is analyzing your data & rules..."):
+                with st.spinner("Llama 405B is analyzing your logic..."):
                     try:
                         chunk_size = 2500
                         prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
@@ -159,12 +166,12 @@ with tab5:
                             
                             for attempt in range(3):
                                 try:
-                                    # MODEL 1: OPENAI (Chat & Analysis)
-                                    completion = openai_client.chat.completions.create(
-                                        model="gpt-4o-mini",  
+                                    # MODEL 1: NVIDIA Llama 3.1 405B
+                                    completion = nvidia_client.chat.completions.create(
+                                        model="meta/llama-3.1-405b-instruct",  
                                         messages=messages_to_send,
-                                        temperature=0.3,
-                                        max_tokens=400
+                                        temperature=0.2,
+                                        max_tokens=500
                                     )
                                     final_ai_reply += completion.choices[0].message.content + "\n\n"
                                     time_module.sleep(1)
@@ -185,9 +192,9 @@ with tab5:
         
         # SYNC BUTTON (Sare tabs prompt data se bharega)
         if st.button("🔄 Sync Button (Extract Data)", use_container_width=True):
-            if not anthropic_client: st.error("Anthropic API Key missing!")
+            if not gemini_model: st.error("Gemini API Key missing!")
             else:
-                with st.spinner("Claude 3.5 Sonnet is building JSON data..."):
+                with st.spinner("Gemini 1.5 Pro is building strictly formatted JSON..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
                     master_working_days = st.session_state.working_days
@@ -202,11 +209,11 @@ with tab5:
                         if part.strip().lower() == "done" or len(part) < 5:
                             continue 
                             
-                        st.toast(f"Claude Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
+                        st.toast(f"Gemini Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
                         
                         extraction_prompt = (
                             "Carefully read this text chunk. Extract timing, classes, teachers (with Periods/Week logic), weekend half day info, AND ALL RULES.\n"
-                            'Format EXACTLY like this JSON. Do not output anything else:\n'
+                            'Format EXACTLY like this JSON schema. Do not include markdown tags like ```json.\n'
                             '{\n'
                             '  "working_days": 6,\n'
                             '  "periods_per_day": 8,\n'
@@ -220,25 +227,18 @@ with tab5:
                         )
                         
                         try:
-                            # MODEL 2: ANTHROPIC CLAUDE 3.5 SONNET (Perfect JSON Extraction)
-                            response = anthropic_client.messages.create(
-                                model="claude-3-5-sonnet-20241022",
-                                max_tokens=2500,
-                                temperature=0.1,
-                                system="You are an expert JSON data extractor. Output ONLY raw valid JSON.",
-                                messages=[
-                                    {"role": "user", "content": extraction_prompt}
-                                ]
+                            # MODEL 2: GOOGLE GEMINI 1.5 PRO (Strict JSON Mode)
+                            response = gemini_model.generate_content(
+                                extraction_prompt,
+                                generation_config=genai.GenerationConfig(
+                                    response_mime_type="application/json",
+                                    temperature=0.1
+                                )
                             )
                             
-                            raw_output = response.content[0].text
+                            raw_output = response.text
                             clean_output = raw_output.strip()
-                            bt = chr(96) * 3  
-                            if clean_output.startswith(bt + "json"): clean_output = clean_output[7:]
-                            elif clean_output.startswith(bt): clean_output = clean_output[3:]
-                            if clean_output.endswith(bt): clean_output = clean_output[:-3]
-                                    
-                            part_data = json.loads(clean_output.strip())
+                            part_data = json.loads(clean_output)
                             
                             if part_data.get("working_days"): master_working_days = int(part_data["working_days"])
                             if part_data.get("periods_per_day"): master_periods_per_day = int(part_data["periods_per_day"])
@@ -277,7 +277,7 @@ with tab5:
                                         t["Periods/Week (Per Class)"] = p_week
                                         teacher_map[name] = t
                             
-                            time_module.sleep(1) 
+                            time_module.sleep(2) 
                         except Exception as e:
                             continue
                     
