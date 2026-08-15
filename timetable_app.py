@@ -23,12 +23,12 @@ st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
 # ================= SECRETS BYPASS (SIDEBAR) =================
 with st.sidebar:
     st.header("🔑 API Keys Setup")
-    st.markdown("Gemini hat gaya! Ab poori app **Nemotron 550B** par chalegi.")
+    st.markdown("Poori app ab **Nvidia Llama 405B** (Nemotron Equivalent) par chalegi.")
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
     st.info("🛡️ Yeh key safe hai aur GitHub par save nahi hogi. App refresh hone par isko wapas dalna padega.")
 
 # ================= API CLIENT SETUP =================
-# 1. Nvidia NIM (Nemotron 550B)
+# 1. Nvidia NIM
 try:
     if nvidia_api_key:
         nvidia_client = OpenAI(
@@ -40,7 +40,7 @@ try:
 except:
     nvidia_client = None
 
-st.title("🏫 Advanced Timetable Pro (Nemotron 550B Solo Edition)")
+st.title("🏫 Advanced Timetable Pro (Nvidia 405B Solo Edition)")
 
 # ================= STATE INITIALIZATION =================
 # TAB 1 States
@@ -132,7 +132,7 @@ with tab5:
                         "5. Once user says 'DONE' or confirms everything is provided, reply EXACTLY: '✅ All data verified! Kripya right side par Sync Button dabayein.'"
                     )
                 },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Main Nvidia Nemotron 550B hoon. Kripya apna data bhejein, main analyze karunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Main Nvidia 405B Engine hoon. Kripya apna data bhejein, main analyze karunga."}
             ]
 
         chat_container = st.container(height=450)
@@ -151,9 +151,9 @@ with tab5:
             with chat_container:
                 with st.chat_message("user"): st.markdown(prompt)
 
-            if not nvidia_client: st.error("❌ Nvidia API Key missing! Kripya Left Sidebar mein key dalein.")
+            if not nvidia_client: st.error("❌ Nvidia API Key missing! Kripya Left Sidebar mein key dalein (Bina double quotes ke).")
             else:
-                with st.spinner("Nemotron 550B is analyzing your logic..."):
+                with st.spinner("Nvidia 405B is analyzing your logic..."):
                     try:
                         chunk_size = 2500
                         prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
@@ -167,8 +167,9 @@ with tab5:
                             
                             for attempt in range(3):
                                 try:
+                                    # Yahan sahi API Model naam lagaya gaya hai
                                     completion = nvidia_client.chat.completions.create(
-                                        model="NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",  
+                                        model="meta/llama-3.1-405b-instruct",  
                                         messages=messages_to_send,
                                         temperature=0.2,
                                         max_tokens=500
@@ -190,11 +191,11 @@ with tab5:
     with col_engine:
         st.subheader("⚙️ Action Center")
         
-        # SYNC BUTTON (Ab yeh bhi Nemotron se JSON banayega)
+        # SYNC BUTTON (Ab yeh Nvidia se JSON banayega)
         if st.button("🔄 Sync Button (Extract Data)", use_container_width=True):
-            if not nvidia_client: st.error("Nvidia API Key missing! Kripya Left Sidebar mein key dalein.")
+            if not nvidia_client: st.error("Nvidia API Key missing! Kripya Left Sidebar mein key dalein (Bina double quotes ke).")
             else:
-                with st.spinner("Nemotron 550B is building strictly formatted JSON..."):
+                with st.spinner("Nvidia 405B is building strictly formatted JSON..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     
                     master_working_days = st.session_state.working_days
@@ -209,7 +210,7 @@ with tab5:
                         if part.strip().lower() == "done" or len(part) < 5:
                             continue 
                             
-                        st.toast(f"Nemotron Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
+                        st.toast(f"Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
                         
                         extraction_prompt = (
                             "You are a strict JSON data extractor. Read this text chunk carefully and extract timing, classes, teachers (with Periods/Week logic), weekend half day info, AND ALL RULES.\n"
@@ -227,9 +228,9 @@ with tab5:
                         )
                         
                         try:
-                            # Yahan Gemini ko hatakar Nemotron lagaya gaya hai
+                            # Yahan bhi sahi API Model naam lagaya gaya hai
                             response = nvidia_client.chat.completions.create(
-                                model="NVIDIA-Nemotron-3-Ultra-550B-A55B-NVFP4",
+                                model="meta/llama-3.1-405b-instruct",
                                 messages=[{"role": "user", "content": extraction_prompt}],
                                 temperature=0.1,
                                 max_tokens=2000
@@ -238,7 +239,7 @@ with tab5:
                             raw_output = response.choices[0].message.content
                             clean_output = raw_output.strip()
                             
-                            # MARKDOWN CLEANER (Ye Nemotron ke extra text ko saaf karega)
+                            # MARKDOWN CLEANER
                             if clean_output.startswith("```json"):
                                 clean_output = clean_output[7:]
                             elif clean_output.startswith("```"):
@@ -290,7 +291,7 @@ with tab5:
                             time_module.sleep(2) 
                         except Exception as e:
                             st.error(f"❌ DATA SYNC ERROR: {e}")
-                            st.info(f"Raw Output form Nemotron was: {clean_output}")
+                            st.info(f"Raw Output form API was: {clean_output}")
                             continue
                     
                     if not teacher_map:
@@ -315,7 +316,7 @@ with tab5:
                                 cleaned_rules.append(str(rule_text))
                             st.session_state.rules_df = pd.DataFrame({"Rule": list(set(cleaned_rules))})
                             
-                        st.success("✅ 2. Data Received and JSON successfully built via Nemotron! All Tabs updated. Now run the Engine.")
+                        st.success("✅ Data Sync Successful! All Tabs updated. Now run the Engine.")
                         st.rerun()
 
         st.markdown("---")
