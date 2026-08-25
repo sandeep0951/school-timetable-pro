@@ -77,14 +77,15 @@ def chat_ai3(user_input, current_data_str, history):
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
     
     system_prompt = f"""You are 'AI-3', an expert Timetable Diagnostics and Rule Fixer AI. 
-    You help the user troubleshoot why their Timetable Engine is failing. You communicate in friendly Hinglish (Hindi + English).
+    You help the user troubleshoot why their Timetable Engine (OR-Tools) is failing (Deadlock). You communicate in friendly Hinglish (Hindi + English).
     
     CURRENT LIVE APP DATA (From Tabs):
     {current_data_str}
     
     YOUR DUTIES:
-    1. If the user asks why the engine failed, analyze the data above. Look for bottlenecks (e.g., classes requiring more periods than working days, teachers overloaded, conflicting strict rules like 'max 2 consecutive periods' combined with high frequency subjects). Explain clearly.
-    2. RULE MODIFICATION: If the user explicitly asks you to change, add, or delete a rule, you MUST perform the action and output the entirely new, updated list of rules inside a specific JSON block format at the end of your message. 
+    1. DIAGNOSE: Analyze the data above. Look for bottlenecks (e.g., classes requiring more periods than working days, teachers overloaded, conflicting strict rules like 'max 2 consecutive periods' combined with high frequency subjects). Explain clearly WHY OR-Tools failed.
+    2. SUGGEST: Provide 2-3 bullet points on what needs to be changed in the data or rules.
+    3. RULE MODIFICATION: If the user explicitly asks you to change, add, or delete a rule (or if they accept your suggestion to remove a strict rule), you MUST perform the action and output the entirely new, updated list of rules inside a specific JSON block format at the end of your message. 
     
     JSON FORMAT FOR UPDATING RULES:
     ```json
@@ -92,7 +93,7 @@ def chat_ai3(user_input, current_data_str, history):
       "updated_rules": ["Rule 1", "Rule 2", "New Rule"]
     }}
     ```
-    (Only output the JSON block if the user actually requested a rule change. Otherwise, just reply with text analysis).
+    (Only output the JSON block if a rule needs to be updated. Otherwise, just reply with text analysis).
     """
     
     messages = [{"role": "system", "content": system_prompt}] + history
@@ -179,7 +180,7 @@ if "teachers_df" not in st.session_state:
     st.session_state.teachers_df = pd.DataFrame({"Teacher Name": ["Mr. Rohan", "Coach Ravi"], "Subject": ["Maths", "Sports"], "Allowed Classes": ["All", "All"], "Periods/Week (Per Class)": [6, 4]})
 if "rules_df" not in st.session_state: st.session_state.rules_df = pd.DataFrame({"Rule": []})
 if "ai3_messages" not in st.session_state: 
-    st.session_state.ai3_messages = [{"role": "assistant", "content": "Namaste Sir! Main AI-3 (The Fixer) hoon. Agar aapka timetable deadlock me fasa hai, toh mujhe boliye 'Data check karo'. Main rules badal bhi sakta hoon, bas mujhe order dijiye!"}]
+    st.session_state.ai3_messages = [{"role": "assistant", "content": "Namaste Sir! Main AI-3 (The Fixer) hoon. Agar aapka timetable Google OR-Tools par fail ho raha hai, toh upar wala **'Auto-Analyze'** button dabayein!"}]
 
 # ================= UI TABS =================
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕒 Timings", "🏫 Classes", "👨‍🏫 Teachers", "⚙️ Rules", "🚀💬 AI & Engine Center"])
@@ -352,13 +353,22 @@ with tab5:
                             st.success(f"🔥 OR-Tools Success! (Status: {solver.StatusName(status)})")
                             st.dataframe(df, use_container_width=True, hide_index=True)
                         else:
-                            st.error("❌ OR-Tools Failed. Absolute Deadlock. Use AI-3 to troubleshoot!")
+                            st.error("❌ OR-Tools Failed. Absolute Deadlock. Neeche 'Auto-Analyze' Button Dabayein!")
 
     st.markdown("---")
     
     # ================= AI 3: DEADLOCK & RULE FIXER CHAT =================
     st.markdown("### 🤖 Step 3: AI-3 Deadlock Fixer & Rule Manager")
     
+    # 🔥 YAHAN HAI AAPKA NAYA "AUTO-ANALYZE" BUTTON 🔥
+    col_a3_1, col_a3_2 = st.columns([7, 3])
+    with col_a3_1:
+        auto_analyze_btn = st.button("🚨 Auto-Analyze OR-Tools Error (Deadlock)", type="secondary", use_container_width=True)
+    with col_a3_2:
+        if st.button("🗑️ Clear AI-3 Chat", use_container_width=True):
+            st.session_state.ai3_messages = st.session_state.ai3_messages[:1]
+            st.rerun()
+            
     ai3_container = st.container(height=350)
     with ai3_container:
         for message in st.session_state.ai3_messages:
@@ -369,18 +379,22 @@ with tab5:
                     with st.chat_message(message["role"]): st.markdown(display_text)
 
     with st.form("ai3_form", clear_on_submit=True):
-        ai3_prompt = st.text_area("AI-3 se baat karein (e.g., 'Data check karo', ya 'Rules me max consecutive 2 kar do'):", height=80)
-        c3, c4 = st.columns([7,3])
-        with c3: submit_ai3 = st.form_submit_button("Ask AI-3 & Update Rules 🛠️")
-        with c4: 
-            if st.form_submit_button("🗑️ Clear Chat"): st.session_state.ai3_messages = st.session_state.ai3_messages[:1]; st.rerun()
+        ai3_prompt = st.text_area("AI-3 se baat karein (Ya upar wala 'Auto-Analyze' button dabayein):", height=80)
+        submit_ai3 = st.form_submit_button("Ask AI-3 & Update Rules 🛠️")
 
-    if submit_ai3 and ai3_prompt:
+    # Handling both Button Click and Manual Text Submit
+    trigger_prompt = None
+    if auto_analyze_btn:
+        trigger_prompt = "Google OR-Tools timetable banane mein fail ho gaya hai (Deadlock). Kripya mere current data aur rules ko check karo, galti pakdo, aur batao mujhe kya change karna chahiye?"
+    elif submit_ai3 and ai3_prompt:
+        trigger_prompt = ai3_prompt
+
+    if trigger_prompt:
         if not nvidia_api_key: st.error("❌ Key Missing!")
         else:
-            st.session_state.ai3_messages.append({"role": "user", "content": ai3_prompt})
+            st.session_state.ai3_messages.append({"role": "user", "content": trigger_prompt})
             with ai3_container:
-                with st.chat_message("user"): st.markdown(ai3_prompt)
+                with st.chat_message("user"): st.markdown(trigger_prompt)
             
             with st.spinner("AI-3 data analyze kar raha hai..."):
                 try:
@@ -395,7 +409,7 @@ with tab5:
                     live_data_str = json.dumps(live_data)
                     
                     # AI-3 ko bhejna
-                    reply = chat_ai3(ai3_prompt, live_data_str, [m for m in st.session_state.ai3_messages if m["role"] != "system"])
+                    reply = chat_ai3(trigger_prompt, live_data_str, [m for m in st.session_state.ai3_messages if m["role"] != "system"])
                     st.session_state.ai3_messages.append({"role": "assistant", "content": reply})
                     
                     display_text = re.sub(r'```json\s*\{.*?\}\s*```', '', reply, flags=re.DOTALL).strip()
@@ -414,6 +428,6 @@ with tab5:
                                 time_module.sleep(2)
                                 st.rerun()
                         except Exception as e:
-                            st.warning(f"AI-3 tried to update rules but format was slightly off: {e}")
+                            pass # Agar json thik se nahi bana toh skip kar dega
                             
                 except Exception as e: st.error(f"AI 3 Error: {e}")
