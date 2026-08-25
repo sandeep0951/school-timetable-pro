@@ -21,7 +21,7 @@ st.set_page_config(page_title="Advanced Timetable Pro (Triple AI System)", layou
 # ================= SECRETS BYPASS (SIDEBAR) =================
 with st.sidebar:
     st.header("🔑 API Keys Setup")
-    st.markdown("Triple AI Architecture:\n1. Chat: 8B\n2. JSON Builder: 70B\n3. Deadlock Analyzer: 70B")
+    st.markdown("Triple AI Architecture:\n1. Chat: 8B\n2. JSON Builder: 70B\n3. Data Analyzer: 70B")
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
     if ORTOOLS_AVAILABLE:
         st.success("✅ Google OR-Tools is Active!")
@@ -71,21 +71,78 @@ def json_ai(prompt_text):
     if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
-# 🔥 NEW: AI 3 - Deadlock Analyzer (70B) 🔥
+# AI 3: Deadlock & Data Analyzer (70B) 
 def deadlock_ai(data_str):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
     system_prompt = (
-        "You are an expert Timetable Diagnostics AI. The OR-Tools constraint solver just failed (Deadlock). "
+        "You are an expert Timetable Diagnostics AI. The user wants you to analyze their current timetable data configuration. "
         "Analyze the provided JSON data of teachers, classes, timings, and rules. "
-        "Identify exactly WHY it failed. Check for logical impossibilities: e.g., A teacher assigned more periods than weekly slots, "
-        "or classes requiring more periods than available, or conflicting rules. "
-        "Explain the exact bottleneck clearly in friendly Hinglish (Hindi/English mix) and provide 2-3 actionable suggestions for the user to fix it."
+        "Identify any logical impossibilities, poor teacher-to-class ratios, or strict rules that might cause the engine to fail or produce bad results. "
+        "Explain the analysis clearly in friendly Hinglish (Hindi/English mix) and provide 2-3 actionable suggestions for the user to improve their data."
     )
     payload = {"model": "meta/llama-3.1-70b-instruct", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": data_str}], "temperature": 0.2, "max_tokens": 1000}
     response = requests.post(url, headers=headers, json=payload, timeout=120)
     if response.status_code != 200: raise Exception(f"Deadlock AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
+
+# --- HELPER FUNCTION FOR DATA PREP ---
+def prepare_engine_data():
+    sys.setrecursionlimit(5000)
+    classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
+    teachers_list = st.session_state.teachers_df.to_dict('records')
+    periods_per_day = st.session_state.periods_per_day
+    working_days = st.session_state.working_days
+    break_at = st.session_state.break_at
+    fixed_rules = st.session_state.rules_df["Rule"].dropna().tolist()
+    is_sat_half = st.session_state.saturday_half_day
+    
+    rule_max_consecutive = 10 
+    for r in fixed_rules:
+        r_lower = r.lower()
+        if "consecutive" in r_lower or "continuous" in r_lower:
+            nums = re.findall(r'\d+', r_lower)
+            if nums: rule_max_consecutive = int(nums[0])
+            
+    days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    period_labels, valid_periods, global_p_idx = [], [], 0
+    
+    for d in range(working_days):
+        day_name = days_str[d]
+        current_day_periods = 4 if day_name.lower() == "saturday" and is_sat_half else periods_per_day
+        for i in range(1, current_day_periods + 1):
+            global_p_idx += 1
+            period_labels.append(f"{day_name} - P{i}")
+            valid_periods.append(global_p_idx)
+            if i == break_at and not (day_name.lower() == "saturday" and is_sat_half): 
+                period_labels.append(f"{day_name} - LUNCH")
+                
+    total_weekly_periods = len(valid_periods)
+    initial_timetable = {c: ["EMPTY"] * len(period_labels) for c in classes_list} 
+    for c in classes_list:
+        for idx, label in enumerate(period_labels):
+            if "LUNCH" in label: initial_timetable[c][idx] = "LUNCH / BREAK"
+                
+    initial_busy_teachers = {i: set() for i in range(len(period_labels))}
+    class_requirements = {c: [] for c in classes_list}
+    
+    for t in teachers_list:
+        t_name, t_sub_raw, t_allowed_str = t.get("Teacher Name", ""), str(t.get("Subject", "")), str(t.get("Allowed Classes", "")).strip()
+        try: p_per_class = int(t.get("Periods/Week (Per Class)", working_days))
+        except: p_per_class = working_days
+        if p_per_class > total_weekly_periods: p_per_class = total_weekly_periods
+
+        actual_classes = classes_list if str(t_allowed_str).lower() == "all" or str(t_allowed_str) == "" else [c for c in classes_list if c.lower() in [x.strip().lower() for x in str(t_allowed_str).split(",")]]
+        for c in actual_classes:
+            for sub in [s.strip() for s in t_sub_raw.split(",")]:
+                for _ in range(p_per_class): class_requirements[c].append((t_name, sub))
+
+    for c in classes_list:
+        if len(class_requirements[c]) > total_weekly_periods:
+            random.shuffle(class_requirements[c]); class_requirements[c] = class_requirements[c][:total_weekly_periods]
+        while len(class_requirements[c]) < total_weekly_periods: class_requirements[c].append(("-", "-"))
+        
+    return classes_list, period_labels, valid_periods, initial_timetable, initial_busy_teachers, class_requirements, rule_max_consecutive
 
 
 st.title("🏫 Advanced Timetable Pro (Triple AI System)")
@@ -106,7 +163,7 @@ if "rules_df" not in st.session_state: st.session_state.rules_df = pd.DataFrame(
 
 
 # ================= UI TABS =================
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕒 Timings", "🏫 Classes", "👨‍🏫 Teachers", "⚙️ Rules", "🚀💬 AI Center"])
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕒 Timings", "🏫 Classes", "👨‍🏫 Teachers", "⚙️ Rules", "🚀💬 AI & Engine Center"])
 
 with tab1:
     col1, col2 = st.columns(2)
@@ -126,22 +183,22 @@ with tab5:
     col_chat, col_engine = st.columns([4, 6], gap="large")
     
     with col_chat:
-        col_c1, col_c2 = st.columns([7, 3])
-        with col_c1: st.subheader("💬 AI 1: Chat")
-        with col_c2:
-            if st.button("🗑️ Clear"): del st.session_state["chat_messages"]; st.rerun()
-
+        st.subheader("💬 Step 1: Give Prompt")
         if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
 
-        chat_container = st.container(height=450)
+        chat_container = st.container(height=400)
         with chat_container:
             for message in st.session_state.chat_messages:
                 if message["role"] != "system":
                     with st.chat_message(message["role"]): st.markdown(message["content"])
 
         with st.form("chat_input_form", clear_on_submit=True):
-            prompt = st.text_area("Paste Data Here:", height=120)
-            submit_chat = st.form_submit_button("Send Data 🚀")
+            prompt = st.text_area("Paste Data Here:", height=100)
+            c1, c2 = st.columns([7,3])
+            with c1: submit_chat = st.form_submit_button("Send Data 🚀")
+            with c2: 
+                if st.form_submit_button("🗑️ Clear"): 
+                    st.session_state.chat_messages = []; st.rerun()
 
         if submit_chat and prompt:
             if not nvidia_api_key: st.error("❌ Key Missing!")
@@ -158,8 +215,9 @@ with tab5:
                     except Exception as e: st.error(f"AI 1 Error: {e}")
 
     with col_engine:
-        st.subheader("⚙️ Action Center")
+        st.subheader("⚙️ Step 2: Manage & Generate")
         
+        # --- BUTTON 1: JSON SYNC ---
         if st.button("🔄 AI 2: Extract & Sync Tabs (70B)", use_container_width=True):
             if not nvidia_api_key: st.error("Key Missing!")
             else:
@@ -195,159 +253,114 @@ with tab5:
 
         st.markdown("---")
         
-        if st.button("🚀 Run Timetable Engine", type="primary", use_container_width=True):
-            with st.spinner("Applying Rules & Running Dual Engine..."):
-                sys.setrecursionlimit(5000)
-                
-                classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
-                teachers_list = st.session_state.teachers_df.to_dict('records')
-                periods_per_day = st.session_state.periods_per_day
-                working_days = st.session_state.working_days
-                break_at = st.session_state.break_at
-                fixed_rules = st.session_state.rules_df["Rule"].dropna().tolist()
-                is_sat_half = st.session_state.saturday_half_day
-                
-                rule_max_consecutive = 10 
-                for r in fixed_rules:
-                    r_lower = r.lower()
-                    if "consecutive" in r_lower or "continuous" in r_lower:
-                        nums = re.findall(r'\d+', r_lower)
-                        if nums: rule_max_consecutive = int(nums[0])
-                
-                days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-                period_labels, valid_periods, global_p_idx = [], [], 0
-                for d in range(working_days):
-                    day_name = days_str[d]
-                    current_day_periods = 4 if day_name.lower() == "saturday" and is_sat_half else periods_per_day
-                    for i in range(1, current_day_periods + 1):
-                        global_p_idx += 1
-                        period_labels.append(f"{day_name} - P{i}")
-                        valid_periods.append(global_p_idx)
-                        if i == break_at and not (day_name.lower() == "saturday" and is_sat_half): 
-                            period_labels.append(f"{day_name} - LUNCH")
-                
-                total_weekly_periods = len(valid_periods)
-                initial_timetable = {c: ["EMPTY"] * len(period_labels) for c in classes_list} 
-                for c in classes_list:
-                    for (idx, label) in enumerate(period_labels):
-                        if "LUNCH" in label: initial_timetable[c][idx] = "LUNCH / BREAK"
-                            
-                initial_busy_teachers = {i: set() for i in range(len(period_labels))}
-                class_requirements = {c: [] for c in classes_list}
-                
-                for t in teachers_list:
-                    t_name, t_sub_raw, t_allowed_str = t.get("Teacher Name", ""), str(t.get("Subject", "")), str(t.get("Allowed Classes", "")).strip()
-                    try: p_per_class = int(t.get("Periods/Week (Per Class)", working_days))
-                    except: p_per_class = working_days
-                    if p_per_class > total_weekly_periods: p_per_class = total_weekly_periods
-
-                    actual_classes = classes_list if str(t_allowed_str).lower() == "all" or str(t_allowed_str) == "" else [c for c in classes_list if c.lower() in [x.strip().lower() for x in str(t_allowed_str).split(",")]]
-                    for c in actual_classes:
-                        for sub in [s.strip() for s in t_sub_raw.split(",")]:
-                            for _ in range(p_per_class): class_requirements[c].append((t_name, sub))
-
-                for c in classes_list:
-                    if len(class_requirements[c]) > total_weekly_periods:
-                        random.shuffle(class_requirements[c]); class_requirements[c] = class_requirements[c][:total_weekly_periods]
-                    while len(class_requirements[c]) < total_weekly_periods: class_requirements[c].append(("-", "-"))
-
-                st.info(f"🔄 Trying Python Engine First...")
-                custom_timetable, custom_busy, custom_reqs = copy.deepcopy(initial_timetable), copy.deepcopy(initial_busy_teachers), copy.deepcopy(class_requirements)
-                custom_start_time = time_module.time()
-                
-                def solve_custom(p_idx, c_idx):
-                    if time_module.time() - custom_start_time > 10.0: return False
-                    if p_idx >= len(period_labels): return True
-                    if "LUNCH" in period_labels[p_idx]: return solve_custom(p_idx + 1, 0)
-                    c = classes_list[c_idx]
-                    next_c_idx, next_p_idx = (0, p_idx + 1) if c_idx + 1 >= len(classes_list) else (c_idx + 1, p_idx)
+        # --- ENGINES MANUAL CONTROL ---
+        col_e1, col_e2 = st.columns(2)
+        
+        with col_e1:
+            if st.button("🚀 Run Python Engine", use_container_width=True):
+                with st.spinner("Python Engine is working..."):
+                    c_list, p_labels, v_periods, init_tt, init_busy, c_reqs, rule_max = prepare_engine_data()
+                    custom_start = time_module.time()
                     
-                    if custom_timetable[c][p_idx] != "EMPTY" or len(custom_reqs[c]) == 0: return solve_custom(next_p_idx, next_c_idx)
-                    
-                    valid_reqs, seen_reqs = [], set()
-                    for req in custom_reqs[c]:
-                        if req not in seen_reqs: 
-                            seen_reqs.add(req)
-                            if req[0] not in custom_busy[p_idx] or req[0] == "-":
-                                if req[0] != "-":
-                                    consecutive = sum(1 for back_p in range(p_idx - 1, -1, -1) if not "LUNCH" in period_labels[back_p] and req[0] in custom_busy[back_p])
-                                    if consecutive >= rule_max_consecutive: continue 
-                                valid_reqs.append(req)
-                    
-                    random.shuffle(valid_reqs) 
-                    for req in valid_reqs:
-                        t_name, sub = req
-                        custom_timetable[c][p_idx] = "---" if t_name == "-" else f"{sub} ({t_name})"
-                        if t_name != "-": custom_busy[p_idx].add(t_name)
-                        custom_reqs[c].remove(req) 
-                        if solve_custom(next_p_idx, next_c_idx): return True
-                        custom_timetable[c][p_idx] = "EMPTY"
-                        if t_name != "-": custom_busy[p_idx].remove(t_name)
-                        custom_reqs[c].append(req) 
-                    return False
+                    def solve_custom(p_idx, c_idx):
+                        if time_module.time() - custom_start > 10.0: return False
+                        if p_idx >= len(p_labels): return True
+                        if "LUNCH" in p_labels[p_idx]: return solve_custom(p_idx + 1, 0)
+                        c = c_list[c_idx]
+                        nxt_c, nxt_p = (0, p_idx + 1) if c_idx + 1 >= len(c_list) else (c_idx + 1, p_idx)
+                        
+                        if init_tt[c][p_idx] != "EMPTY" or len(c_reqs[c]) == 0: return solve_custom(nxt_p, nxt_c)
+                        
+                        valid_reqs, seen = [], set()
+                        for req in c_reqs[c]:
+                            if req not in seen:
+                                seen.add(req)
+                                if req[0] not in init_busy[p_idx] or req[0] == "-":
+                                    if req[0] != "-":
+                                        consec = sum(1 for back_p in range(p_idx - 1, -1, -1) if not "LUNCH" in p_labels[back_p] and req[0] in init_busy[back_p])
+                                        if consec >= rule_max: continue 
+                                    valid_reqs.append(req)
+                        random.shuffle(valid_reqs) 
+                        for req in valid_reqs:
+                            t_name, sub = req
+                            init_tt[c][p_idx] = "---" if t_name == "-" else f"{sub} ({t_name})"
+                            if t_name != "-": init_busy[p_idx].add(t_name)
+                            c_reqs[c].remove(req) 
+                            if solve_custom(nxt_p, nxt_c): return True
+                            init_tt[c][p_idx] = "EMPTY"
+                            if t_name != "-": init_busy[p_idx].remove(t_name)
+                            c_reqs[c].append(req) 
+                        return False
 
-                if solve_custom(0, 0):
-                    df = pd.DataFrame(custom_timetable)
-                    df.insert(0, "Day / Period", period_labels)
-                    st.success("✅ Tier-1 Engine Success!")
-                    st.dataframe(df, use_container_width=True, hide_index=True)
-                else:
-                    st.warning("⚠️ Tier-1 Engine Timed Out. Activating Google OR-Tools...")
-                    if not ORTOOLS_AVAILABLE:
-                        st.error("❌ Google OR-Tools is NOT installed! Timetable Failed.")
+                    if solve_custom(0, 0):
+                        df = pd.DataFrame(init_tt)
+                        df.insert(0, "Day / Period", p_labels)
+                        st.success("✅ Python Engine Success! Check below:")
+                        st.dataframe(df, use_container_width=True, hide_index=True)
                     else:
-                        ortools_timetable, ortools_reqs = copy.deepcopy(initial_timetable), copy.deepcopy(class_requirements)
+                        st.warning("⚠️ Python Engine failed. Try 'Run Google OR-Tools' button.")
+
+        with col_e2:
+            if st.button("🔥 Run Google OR-Tools", type="primary", use_container_width=True):
+                with st.spinner("Advanced OR-Tools Engine working..."):
+                    if not ORTOOLS_AVAILABLE:
+                        st.error("❌ OR-Tools not installed!")
+                    else:
+                        c_list, p_labels, v_periods, ortools_tt, _, ortools_reqs, _ = prepare_engine_data()
                         model = cp_model.CpModel()
-                        x = {c: {p: {r_idx: model.NewBoolVar(f'assign_{c}_{p}_{r_idx}') for r_idx in range(len(ortools_reqs[c]))} for p in valid_periods} for c in classes_list}
+                        x = {c: {p: {r_idx: model.NewBoolVar(f'assign_{c}_{p}_{r_idx}') for r_idx in range(len(ortools_reqs[c]))} for p in v_periods} for c in c_list}
 
-                        for c in classes_list:
-                            for p in valid_periods: model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(ortools_reqs[c]))])
-                            for r_idx in range(len(ortools_reqs[c])): model.AddExactlyOne([x[c][p][r_idx] for p in valid_periods])
+                        for c in c_list:
+                            for p in v_periods: model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(ortools_reqs[c]))])
+                            for r_idx in range(len(ortools_reqs[c])): model.AddExactlyOne([x[c][p][r_idx] for p in v_periods])
 
-                        all_teachers = {t_name for c in classes_list for t_name, sub in ortools_reqs[c] if t_name != "-"}
-                        for p in valid_periods:
+                        all_teachers = {t_name for c in c_list for t_name, sub in ortools_reqs[c] if t_name != "-"}
+                        for p in v_periods:
                             for teacher in all_teachers:
-                                teacher_assignments_in_period = [x[c][p][r_idx] for c in classes_list for r_idx, req in enumerate(ortools_reqs[c]) if req[0] == teacher]
-                                if len(teacher_assignments_in_period) > 1: model.AddAtMostOne(teacher_assignments_in_period)
+                                t_assigns = [x[c][p][r_idx] for c in c_list for r_idx, req in enumerate(ortools_reqs[c]) if req[0] == teacher]
+                                if len(t_assigns) > 1: model.AddAtMostOne(t_assigns)
 
                         solver = cp_model.CpSolver()
                         solver.parameters.max_time_in_seconds = 30.0 
                         status = solver.Solve(model)
 
-                        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-                            for c in classes_list:
-                                for p in valid_periods:
+                        if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
+                            for c in c_list:
+                                for p in v_periods:
                                     for r_idx, req in enumerate(ortools_reqs[c]):
                                         if solver.Value(x[c][p][r_idx]) == 1:
                                             p_label_idx = -1
-                                            for idx, label in enumerate(period_labels):
+                                            for idx, label in enumerate(p_labels):
                                                 if not "LUNCH" in label:
                                                     p_label_idx += 1
                                                     if p_label_idx == p - 1:
-                                                        ortools_timetable[c][idx] = "---" if req[0] == "-" else f"{req[1]} ({req[0]})"
+                                                        ortools_tt[c][idx] = "---" if req[0] == "-" else f"{req[1]} ({req[0]})"
                                                         break
-                                            
-                            df = pd.DataFrame(ortools_timetable)
-                            df.insert(0, "Day / Period", period_labels)
-                            st.success(f"🔥 Google OR-Tools Success! (Status: {solver.StatusName(status)})")
+                            df = pd.DataFrame(ortools_tt)
+                            df.insert(0, "Day / Period", p_labels)
+                            st.success(f"🔥 OR-Tools Success! (Status: {solver.StatusName(status)})")
                             st.dataframe(df, use_container_width=True, hide_index=True)
                         else:
-                            st.error("❌ Both Engines Failed (Absolute Deadlock).")
-                            
-                            # 🔥 YAHAN SE AI-3 APNA JAADU SHURU KAREGA 🔥
-                            with st.spinner("🤖 AI 3 (Deadlock Analyzer) problem dhoondh raha hai... Please Wait!"):
-                                try:
-                                    current_data_for_ai3 = {
-                                        "working_days": working_days,
-                                        "periods_per_day": periods_per_day,
-                                        "total_weekly_slots": total_weekly_periods,
-                                        "classes": classes_list,
-                                        "teachers": teachers_list,
-                                        "rules": fixed_rules
-                                    }
-                                    deadlock_report = deadlock_ai(json.dumps(current_data_for_ai3))
-                                    st.warning("⚠️ **AI 3 Deadlock Analysis & Suggestions (Engine kyu fail hua):**")
-                                    st.markdown(deadlock_report)
-                                    st.info("💡 **Next Step:** Upar diye gaye suggestions padhein. Phir Tab 2, 3 ya 4 mein jakar data theek karein aur dobara Run Engine dabayein.")
-                                except Exception as e:
-                                    st.error(f"AI 3 Error: {e}")
+                            st.error("❌ OR-Tools Failed. Absolute Deadlock in rules/data.")
+
+        st.markdown("---")
+        
+        # --- BUTTON 3: AI-3 ANALYZER ---
+        st.markdown("### 🤖 Step 3: Analyze & Troubleshoot")
+        if st.button("🔍 AI-3: Analyze Data & Suggest Improvements", use_container_width=True):
+            if not nvidia_api_key: st.error("Key Missing!")
+            else:
+                with st.spinner("AI 3 aapke pure data ko check kar raha hai... Please wait!"):
+                    try:
+                        current_data_for_ai3 = {
+                            "working_days": st.session_state.working_days,
+                            "periods_per_day": st.session_state.periods_per_day,
+                            "classes": st.session_state.classes_df["Class Name"].tolist(),
+                            "teachers": st.session_state.teachers_df.to_dict('records'),
+                            "rules": st.session_state.rules_df["Rule"].tolist()
+                        }
+                        report = deadlock_ai(json.dumps(current_data_for_ai3))
+                        st.info("💡 **AI-3 Analysis Report:**")
+                        st.markdown(report)
+                    except Exception as e:
+                        st.error(f"AI 3 Error: {e}")
