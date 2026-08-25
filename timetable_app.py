@@ -21,7 +21,7 @@ st.set_page_config(page_title="Advanced Timetable Pro (Triple AI System)", layou
 # ================= SECRETS BYPASS (SIDEBAR) =================
 with st.sidebar:
     st.header("🔑 API Keys Setup")
-    st.markdown("Triple AI Architecture:\n1. Chat: 8B\n2. JSON Builder: 70B\n3. Data Analyzer: 70B")
+    st.markdown("Triple AI Architecture:\n1. Data Setup: 8B\n2. JSON Sync: 70B\n3. Rule Fixer: 70B")
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
     if ORTOOLS_AVAILABLE:
         st.success("✅ Google OR-Tools is Active!")
@@ -71,20 +71,38 @@ def json_ai(prompt_text):
     if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
-# AI 3: Deadlock & Data Analyzer (70B) 
-def deadlock_ai(data_str):
+# AI 3: Interactive Diagnostics & Rule Fixer (70B)
+def chat_ai3(user_input, current_data_str, history):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
-    system_prompt = (
-        "You are an expert Timetable Diagnostics AI. The user wants you to analyze their current timetable data configuration. "
-        "Analyze the provided JSON data of teachers, classes, timings, and rules. "
-        "Identify any logical impossibilities, poor teacher-to-class ratios, or strict rules that might cause the engine to fail or produce bad results. "
-        "Explain the analysis clearly in friendly Hinglish (Hindi/English mix) and provide 2-3 actionable suggestions for the user to improve their data."
-    )
-    payload = {"model": "meta/llama-3.1-70b-instruct", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": data_str}], "temperature": 0.2, "max_tokens": 1000}
+    
+    system_prompt = f"""You are 'AI-3', an expert Timetable Diagnostics and Rule Fixer AI. 
+    You help the user troubleshoot why their Timetable Engine is failing. You communicate in friendly Hinglish (Hindi + English).
+    
+    CURRENT LIVE APP DATA (From Tabs):
+    {current_data_str}
+    
+    YOUR DUTIES:
+    1. If the user asks why the engine failed, analyze the data above. Look for bottlenecks (e.g., classes requiring more periods than working days, teachers overloaded, conflicting strict rules like 'max 2 consecutive periods' combined with high frequency subjects). Explain clearly.
+    2. RULE MODIFICATION: If the user explicitly asks you to change, add, or delete a rule, you MUST perform the action and output the entirely new, updated list of rules inside a specific JSON block format at the end of your message. 
+    
+    JSON FORMAT FOR UPDATING RULES:
+    ```json
+    {{
+      "updated_rules": ["Rule 1", "Rule 2", "New Rule"]
+    }}
+    ```
+    (Only output the JSON block if the user actually requested a rule change. Otherwise, just reply with text analysis).
+    """
+    
+    messages = [{"role": "system", "content": system_prompt}] + history
+    messages.append({"role": "user", "content": user_input})
+    
+    payload = {"model": "meta/llama-3.1-70b-instruct", "messages": messages, "temperature": 0.2, "max_tokens": 1500}
     response = requests.post(url, headers=headers, json=payload, timeout=120)
-    if response.status_code != 200: raise Exception(f"Deadlock AI Error: {response.text}")
+    if response.status_code != 200: raise Exception(f"AI 3 Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
+
 
 # --- HELPER FUNCTION FOR DATA PREP ---
 def prepare_engine_data():
@@ -160,7 +178,8 @@ if "classes_df" not in st.session_state: st.session_state.classes_df = pd.DataFr
 if "teachers_df" not in st.session_state:
     st.session_state.teachers_df = pd.DataFrame({"Teacher Name": ["Mr. Rohan", "Coach Ravi"], "Subject": ["Maths", "Sports"], "Allowed Classes": ["All", "All"], "Periods/Week (Per Class)": [6, 4]})
 if "rules_df" not in st.session_state: st.session_state.rules_df = pd.DataFrame({"Rule": []})
-
+if "ai3_messages" not in st.session_state: 
+    st.session_state.ai3_messages = [{"role": "assistant", "content": "Namaste Sir! Main AI-3 (The Fixer) hoon. Agar aapka timetable deadlock me fasa hai, toh mujhe boliye 'Data check karo'. Main rules badal bhi sakta hoon, bas mujhe order dijiye!"}]
 
 # ================= UI TABS =================
 tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕒 Timings", "🏫 Classes", "👨‍🏫 Teachers", "⚙️ Rules", "🚀💬 AI & Engine Center"])
@@ -180,25 +199,23 @@ with tab3: st.session_state.teachers_df = st.data_editor(st.session_state.teache
 with tab4: st.session_state.rules_df = st.data_editor(st.session_state.rules_df, num_rows="dynamic", use_container_width=True)
 
 with tab5:
+    st.markdown("### 🛠️ Step 1 & 2: Setup Data & Run Engine")
     col_chat, col_engine = st.columns([4, 6], gap="large")
     
     with col_chat:
-        st.subheader("💬 Step 1: Give Prompt")
         if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
-
-        chat_container = st.container(height=400)
+        chat_container = st.container(height=300)
         with chat_container:
             for message in st.session_state.chat_messages:
                 if message["role"] != "system":
                     with st.chat_message(message["role"]): st.markdown(message["content"])
 
         with st.form("chat_input_form", clear_on_submit=True):
-            prompt = st.text_area("Paste Data Here:", height=100)
+            prompt = st.text_area("Paste Data Here:", height=80)
             c1, c2 = st.columns([7,3])
             with c1: submit_chat = st.form_submit_button("Send Data 🚀")
             with c2: 
-                if st.form_submit_button("🗑️ Clear"): 
-                    st.session_state.chat_messages = []; st.rerun()
+                if st.form_submit_button("🗑️ Clear"): st.session_state.chat_messages = []; st.rerun()
 
         if submit_chat and prompt:
             if not nvidia_api_key: st.error("❌ Key Missing!")
@@ -215,9 +232,6 @@ with tab5:
                     except Exception as e: st.error(f"AI 1 Error: {e}")
 
     with col_engine:
-        st.subheader("⚙️ Step 2: Manage & Generate")
-        
-        # --- BUTTON 1: JSON SYNC ---
         if st.button("🔄 AI 2: Extract & Sync Tabs (70B)", use_container_width=True):
             if not nvidia_api_key: st.error("Key Missing!")
             else:
@@ -251,11 +265,8 @@ with tab5:
                                 st.rerun()
                         except Exception as e: st.error(f"❌ AI 2 Error: {e}")
 
-        st.markdown("---")
-        
-        # --- ENGINES MANUAL CONTROL ---
+        st.markdown("<br>", unsafe_allow_html=True)
         col_e1, col_e2 = st.columns(2)
-        
         with col_e1:
             if st.button("🚀 Run Python Engine", use_container_width=True):
                 with st.spinner("Python Engine is working..."):
@@ -298,7 +309,7 @@ with tab5:
                         st.success("✅ Python Engine Success! Check below:")
                         st.dataframe(df, use_container_width=True, hide_index=True)
                     else:
-                        st.warning("⚠️ Python Engine failed. Try 'Run Google OR-Tools' button.")
+                        st.warning("⚠️ Python Engine failed. Use AI-3 for diagnosis.")
 
         with col_e2:
             if st.button("🔥 Run Google OR-Tools", type="primary", use_container_width=True):
@@ -341,26 +352,68 @@ with tab5:
                             st.success(f"🔥 OR-Tools Success! (Status: {solver.StatusName(status)})")
                             st.dataframe(df, use_container_width=True, hide_index=True)
                         else:
-                            st.error("❌ OR-Tools Failed. Absolute Deadlock in rules/data.")
+                            st.error("❌ OR-Tools Failed. Absolute Deadlock. Use AI-3 to troubleshoot!")
 
-        st.markdown("---")
-        
-        # --- BUTTON 3: AI-3 ANALYZER ---
-        st.markdown("### 🤖 Step 3: Analyze & Troubleshoot")
-        if st.button("🔍 AI-3: Analyze Data & Suggest Improvements", use_container_width=True):
-            if not nvidia_api_key: st.error("Key Missing!")
-            else:
-                with st.spinner("AI 3 aapke pure data ko check kar raha hai... Please wait!"):
-                    try:
-                        current_data_for_ai3 = {
-                            "working_days": st.session_state.working_days,
-                            "periods_per_day": st.session_state.periods_per_day,
-                            "classes": st.session_state.classes_df["Class Name"].tolist(),
-                            "teachers": st.session_state.teachers_df.to_dict('records'),
-                            "rules": st.session_state.rules_df["Rule"].tolist()
-                        }
-                        report = deadlock_ai(json.dumps(current_data_for_ai3))
-                        st.info("💡 **AI-3 Analysis Report:**")
-                        st.markdown(report)
-                    except Exception as e:
-                        st.error(f"AI 3 Error: {e}")
+    st.markdown("---")
+    
+    # ================= AI 3: DEADLOCK & RULE FIXER CHAT =================
+    st.markdown("### 🤖 Step 3: AI-3 Deadlock Fixer & Rule Manager")
+    
+    ai3_container = st.container(height=350)
+    with ai3_container:
+        for message in st.session_state.ai3_messages:
+            if message["role"] != "system":
+                # JSON block ko hide karke sirf text dikhane ka jugaad
+                display_text = re.sub(r'```json\s*\{.*?\}\s*```', '', message["content"], flags=re.DOTALL).strip()
+                if display_text:
+                    with st.chat_message(message["role"]): st.markdown(display_text)
+
+    with st.form("ai3_form", clear_on_submit=True):
+        ai3_prompt = st.text_area("AI-3 se baat karein (e.g., 'Data check karo', ya 'Rules me max consecutive 2 kar do'):", height=80)
+        c3, c4 = st.columns([7,3])
+        with c3: submit_ai3 = st.form_submit_button("Ask AI-3 & Update Rules 🛠️")
+        with c4: 
+            if st.form_submit_button("🗑️ Clear Chat"): st.session_state.ai3_messages = st.session_state.ai3_messages[:1]; st.rerun()
+
+    if submit_ai3 and ai3_prompt:
+        if not nvidia_api_key: st.error("❌ Key Missing!")
+        else:
+            st.session_state.ai3_messages.append({"role": "user", "content": ai3_prompt})
+            with ai3_container:
+                with st.chat_message("user"): st.markdown(ai3_prompt)
+            
+            with st.spinner("AI-3 data analyze kar raha hai..."):
+                try:
+                    # Live data fetch karke string banana
+                    live_data = {
+                        "working_days": st.session_state.working_days,
+                        "periods_per_day": st.session_state.periods_per_day,
+                        "classes": st.session_state.classes_df["Class Name"].tolist(),
+                        "teachers": st.session_state.teachers_df.to_dict('records'),
+                        "current_rules": st.session_state.rules_df["Rule"].tolist()
+                    }
+                    live_data_str = json.dumps(live_data)
+                    
+                    # AI-3 ko bhejna
+                    reply = chat_ai3(ai3_prompt, live_data_str, [m for m in st.session_state.ai3_messages if m["role"] != "system"])
+                    st.session_state.ai3_messages.append({"role": "assistant", "content": reply})
+                    
+                    display_text = re.sub(r'```json\s*\{.*?\}\s*```', '', reply, flags=re.DOTALL).strip()
+                    with ai3_container:
+                        if display_text:
+                            with st.chat_message("assistant"): st.markdown(display_text)
+                    
+                    # ✨ THE MAGIC: RULE UPDATER ✨
+                    json_match = re.search(r'```json\s*(\{.*?\})\s*```', reply, re.DOTALL)
+                    if json_match:
+                        try:
+                            rule_data = json.loads(json_match.group(1))
+                            if "updated_rules" in rule_data:
+                                st.session_state.rules_df = pd.DataFrame({"Rule": rule_data["updated_rules"]})
+                                st.success("✅ AI-3 ne aapke 'Rules Tab' ko successfully update kar diya hai!")
+                                time_module.sleep(2)
+                                st.rerun()
+                        except Exception as e:
+                            st.warning(f"AI-3 tried to update rules but format was slightly off: {e}")
+                            
+                except Exception as e: st.error(f"AI 3 Error: {e}")
