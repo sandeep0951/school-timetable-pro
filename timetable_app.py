@@ -16,17 +16,21 @@ try:
 except ImportError:
     ORTOOLS_AVAILABLE = False
 
-st.set_page_config(page_title="Advanced Timetable Pro (70B Engine)", layout="wide")
+st.set_page_config(page_title="Advanced Timetable Pro (OR-Tools Integrated)", layout="wide")
 
 # ================= SECRETS BYPASS (SIDEBAR) =================
 with st.sidebar:
     st.header("🔑 API Keys Setup")
-    st.markdown("Dual Architecture:\n1. Chat: Llama 8B (Fast)\n2. JSON: Llama 70B (Heavyweight)")
+    st.markdown("Dual Architecture:\n1. Chat: Llama 8B\n2. JSON: Llama 70B")
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
+    if ORTOOLS_AVAILABLE:
+        st.success("✅ Google OR-Tools is Active!")
+    else:
+        st.error("❌ Google OR-Tools is Missing!")
     st.info("🛡️ Bina double quotes ke key dalein.")
 
 # ================= DUAL AI FUNCTIONS =================
-# AI 1: Chat Collector (Fast 8B Model)
+# AI 1: Chat Collector (8B)
 def chat_ai(messages):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
@@ -35,7 +39,7 @@ def chat_ai(messages):
         "role": "system", 
         "content": (
             "You are a receptionist. Acknowledge the user's data and say: "
-            "'✅ Data is ready for the second stage. Please click the Sync Button to update tabs.' "
+            "'✅ Data is ready. Please click the Sync Button to update tabs.' "
             "DO NOT generate any timetable or JSON."
         )
     }
@@ -48,11 +52,11 @@ def chat_ai(messages):
         "temperature": 0.1,
         "max_tokens": 100
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=20)
+    response = requests.post(url, headers=headers, json=payload, timeout=30)
     if response.status_code != 200: raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
-# AI 2: JSON Expert (Heavyweight 70B Model - No Fake Data)
+# AI 2: JSON Expert (70B)
 def json_ai(prompt_text):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
@@ -60,9 +64,10 @@ def json_ai(prompt_text):
     system_prompt = (
         "You are a strict JSON data extractor. Extract timetable parameters from the text and output ONLY RAW JSON. "
         "CRITICAL RULES: \n"
-        "1. DO NOT invent or hallucinate any Teacher Names, Subjects, or Classes. Use ONLY the data provided in the text.\n"
+        "1. DO NOT invent or hallucinate data. Use ONLY the data provided.\n"
         "2. Ensure all arrays and brackets are properly closed.\n"
-        "3. Output strictly in this exact format (but with the real data from the user):\n"
+        "3. EXTRACT ALL RULES (e.g., 'no double booking', 'max 2 periods per subject per day') and put them in the 'fixed_rules' array.\n"
+        "4. Format exactly like this:\n"
         "{\n"
         '  "working_days": 6,\n'
         '  "periods_per_day": 7,\n'
@@ -70,7 +75,7 @@ def json_ai(prompt_text):
         '  "saturday_half_day": false,\n'
         '  "classes": ["1-A", "1-B"],\n'
         '  "teachers": [{"Teacher Name": "Amit Sharma", "Subject": "English", "Allowed Classes": "1-A, 1-B", "Periods/Week (Per Class)": 6}],\n'
-        '  "fixed_rules": ["Rule 1"]\n'
+        '  "fixed_rules": ["Rule 1: No double booking", "Rule 2: Max 2 consecutive periods"]\n'
         "}"
     )
     
@@ -83,12 +88,14 @@ def json_ai(prompt_text):
         "temperature": 0.0, 
         "max_tokens": 4096 
     }
-    
-    # 🔥 YAHAN TIMEOUT BADHAKAR 300 SECONDS (5 MINUTE) KAR DIYA HAI 🔥
+    # 5 MINUTE TIMEOUT FOR 70B
     response = requests.post(url, headers=headers, json=payload, timeout=300)
-    
     if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
+
+
+st.title("🏫 Advanced Timetable Pro (OR-Tools Restored)")
+
 # ================= STATE INITIALIZATION =================
 if "working_days" not in st.session_state: st.session_state.working_days = 6
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
@@ -176,9 +183,9 @@ with tab5:
                 with chat_container:
                     with st.chat_message("user"): st.markdown(prompt)
 
-                with st.spinner("AI 1 is processing your data..."):
+                with st.spinner("AI 1 is processing..."):
                     try:
-                        reply = chat_ai(st.session_state.chat_messages[-3:]) # Sirf aakhiri messages bhejein
+                        reply = chat_ai(st.session_state.chat_messages[-3:])
                         with chat_container:
                             with st.chat_message("assistant"): st.markdown(reply)
                         st.session_state.chat_messages.append({"role": "assistant", "content": reply})
@@ -192,7 +199,7 @@ with tab5:
         if st.button("🔄 AI 2: Extract & Sync Tabs (70B)", use_container_width=True):
             if not nvidia_api_key: st.error("Key Missing!")
             else:
-                with st.spinner("AI 2 (70B Model) JSON bana raha hai. Isme 30-40 second lag sakte hain..."):
+                with st.spinner("AI 2 JSON bana raha hai (1 se 3 minute lag sakte hain)..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     full_text = " ".join(user_msgs)
                     
@@ -200,7 +207,6 @@ with tab5:
                         st.warning("Pehle chat box me apna data paste karein!")
                     else:
                         try:
-                            # 70B MODEL KO DIRECT DATA BHEJ RAHE HAIN BINA CHUNKS KE
                             raw_output = json_ai(full_text)
                             
                             start_idx = raw_output.find('{')
@@ -211,13 +217,11 @@ with tab5:
                             else:
                                 clean_output = raw_output
                             
-                            # ✨ AUTO FIX EXTRA COMMAS ✨
                             clean_output = re.sub(r',\s*}', '}', clean_output)
                             clean_output = re.sub(r',\s*]', ']', clean_output)
                                 
                             part_data = json.loads(clean_output)
                             
-                            # UPDATING TABS
                             updated = False
                             if "working_days" in part_data: st.session_state.working_days = int(part_data["working_days"]); updated = True
                             if "periods_per_day" in part_data: st.session_state.periods_per_day = int(part_data["periods_per_day"]); updated = True
@@ -238,7 +242,7 @@ with tab5:
                                 updated = True
                                 
                             if updated:
-                                st.success("🎉 BINGO! 70B Engine ne ekdum accurate JSON banaya aur Tabs update kar diye!")
+                                st.success("🎉 BINGO! Tabs update ho gaye (Rules bhi)!")
                                 time_module.sleep(2)
                                 st.rerun()
                             else:
@@ -251,9 +255,9 @@ with tab5:
                             st.error(f"❌ AI 2 API Error: {e}")
 
         st.markdown("---")
-        # RUN ENGINE BUTTON
+        # RUN ENGINE BUTTON (Custom Fallback to OR-Tools)
         if st.button("🚀 Run Timetable Engine", type="primary", use_container_width=True):
-            with st.spinner("Applying Rules & Running Engine purely on your Data..."):
+            with st.spinner("Applying Rules & Running Dual Engine (Custom + OR-Tools)..."):
                 sys.setrecursionlimit(5000)
                 
                 classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
@@ -321,12 +325,10 @@ with tab5:
                     if len(class_requirements[c]) > total_weekly_periods:
                         random.shuffle(class_requirements[c]) 
                         class_requirements[c] = class_requirements[c][:total_weekly_periods]
-                    
-                    # 🔥 No Fake Free Periods 🔥
                     while len(class_requirements[c]) < total_weekly_periods:
                         class_requirements[c].append(("-", "-"))
 
-                st.info(f"🔄 Engine Processing Data Logic...")
+                st.info(f"🔄 Trying Python Engine First...")
                 
                 custom_timetable = copy.deepcopy(initial_timetable)
                 custom_busy = copy.deepcopy(initial_busy_teachers)
@@ -334,7 +336,7 @@ with tab5:
                 custom_start_time = time_module.time()
                 
                 def solve_custom(p_idx, c_idx):
-                    if time_module.time() - custom_start_time > 15.0: return False
+                    if time_module.time() - custom_start_time > 10.0: return False
                     if p_idx >= len(period_labels): return True
                     if "LUNCH" in period_labels[p_idx]: return solve_custom(p_idx + 1, 0)
                     
@@ -385,7 +387,71 @@ with tab5:
                 if solve_custom(0, 0):
                     df = pd.DataFrame(custom_timetable)
                     df.insert(0, "Day / Period", period_labels)
-                    st.success("✅ Timetable Generated! Engine used exactly 30 teachers from your list.")
+                    st.success("✅ Tier-1 Engine Success!")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.error("Engine failed due to strict rules. Try modifying rules.")
+                    st.warning("⚠️ Tier-1 Engine Timed Out. Activating Google OR-Tools (Tier-2)...")
+                    if not ORTOOLS_AVAILABLE:
+                        st.error("❌ Google OR-Tools is NOT installed! Timetable Failed.")
+                    else:
+                        ortools_timetable = copy.deepcopy(initial_timetable)
+                        ortools_reqs = copy.deepcopy(class_requirements)
+                        
+                        model = cp_model.CpModel()
+                        x = {} 
+                        for c in classes_list:
+                            x[c] = {}
+                            for p in valid_periods:
+                                x[c][p] = {}
+                                for r_idx in range(len(ortools_reqs[c])):
+                                    x[c][p][r_idx] = model.NewBoolVar(f'assign_{c}_{p}_{r_idx}')
+
+                        for c in classes_list:
+                            for p in valid_periods:
+                                model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(ortools_reqs[c]))])
+
+                        for c in classes_list:
+                            for r_idx in range(len(ortools_reqs[c])):
+                                model.AddExactlyOne([x[c][p][r_idx] for p in valid_periods])
+
+                        all_teachers = set()
+                        for c in classes_list:
+                            for (t_name, sub) in ortools_reqs[c]:
+                                if t_name != "-": all_teachers.add(t_name)
+
+                        for p in valid_periods:
+                            for teacher in all_teachers:
+                                teacher_assignments_in_period = []
+                                for c in classes_list:
+                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                        if req[0] == teacher:
+                                            teacher_assignments_in_period.append(x[c][p][r_idx])
+                                if len(teacher_assignments_in_period) > 1:
+                                    model.AddAtMostOne(teacher_assignments_in_period)
+
+                        solver = cp_model.CpSolver()
+                        solver.parameters.max_time_in_seconds = 30.0 
+                        status = solver.Solve(model)
+
+                        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
+                            for c in classes_list:
+                                for p in valid_periods:
+                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
+                                        if solver.Value(x[c][p][r_idx]) == 1:
+                                            p_label_idx = -1
+                                            for (idx, label) in enumerate(period_labels):
+                                                if not "LUNCH" in label:
+                                                    p_label_idx += 1
+                                                    if p_label_idx == p - 1:
+                                                        if req[0] == "-":
+                                                            ortools_timetable[c][idx] = "---"
+                                                        else:
+                                                            ortools_timetable[c][idx] = f"{req[1]} ({req[0]})"
+                                                        break
+                                            
+                            df = pd.DataFrame(ortools_timetable)
+                            df.insert(0, "Day / Period", period_labels)
+                            st.success(f"🔥 Google OR-Tools Success! (Status: {solver.StatusName(status)})")
+                            st.dataframe(df, use_container_width=True, hide_index=True)
+                        else:
+                            st.error("❌ Google OR-Tools Failed. Absolute Deadlock in data rules.")
