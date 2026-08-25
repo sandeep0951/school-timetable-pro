@@ -34,7 +34,7 @@ def chat_ai(messages):
         "model": "meta/llama-3.1-8b-instruct", 
         "messages": messages,
         "temperature": 0.3,
-        "max_tokens": 500
+        "max_tokens": 1500
     }
     response = requests.post(url, headers=headers, json=payload, timeout=40)
     if response.status_code != 200: raise Exception(f"Chat AI Error: {response.text}")
@@ -66,7 +66,7 @@ def json_ai(prompt_text):
             {"role": "user", "content": prompt_text}
         ],
         "temperature": 0.1,
-        "max_tokens": 1500
+        "max_tokens": 4096
     }
     response = requests.post(url, headers=headers, json=payload, timeout=60)
     if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
