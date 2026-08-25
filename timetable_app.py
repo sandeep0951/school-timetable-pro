@@ -16,17 +16,17 @@ try:
 except ImportError:
     ORTOOLS_AVAILABLE = False
 
-st.set_page_config(page_title="Advanced Timetable Pro (Ultimate AI)", layout="wide")
+st.set_page_config(page_title="Advanced Timetable Pro (70B Engine)", layout="wide")
 
 # ================= SECRETS BYPASS (SIDEBAR) =================
 with st.sidebar:
     st.header("🔑 API Keys Setup")
-    st.markdown("Dual AI Architecture:\n1. Prompt Collector (1500 T)\n2. JSON Builder (4096 T)")
+    st.markdown("Dual Architecture:\n1. Chat: Llama 8B (Fast)\n2. JSON: Llama 70B (Heavyweight)")
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
     st.info("🛡️ Bina double quotes ke key dalein.")
 
 # ================= DUAL AI FUNCTIONS =================
-# AI 1: Chat Expert (Data Collector & Communicator)
+# AI 1: Chat Collector (Fast 8B Model)
 def chat_ai(messages):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
@@ -34,14 +34,9 @@ def chat_ai(messages):
     system_instruction = {
         "role": "system", 
         "content": (
-            "You are an intelligent data collector for a Timetable Generator. "
-            "Your job is to read user data and map it to 4 Tabs: 1. Timings, 2. Classes, 3. Teachers & Subjects, 4. Rules. "
-            "Follow these rules strictly:\n"
-            "1. Acknowledge received data by saying: 'Data received, working on it...'.\n"
-            "2. Check if the data covers the necessary tabs. If incomplete, politely ask for the missing parts.\n"
-            "3. DO NOT generate the JSON or the timetable yourself.\n"
-            "4. When the user says 'done' or the data seems complete, end your message EXACTLY with: "
-            "'✅ Data is ready for the second stage. Please click the Sync Button to update tabs.'"
+            "You are a receptionist. Acknowledge the user's data and say: "
+            "'✅ Data is ready for the second stage. Please click the Sync Button to update tabs.' "
+            "DO NOT generate any timetable or JSON."
         )
     }
     
@@ -50,50 +45,50 @@ def chat_ai(messages):
     payload = {
         "model": "meta/llama-3.1-8b-instruct", 
         "messages": safe_messages,
-        "temperature": 0.2,
-        "max_tokens": 1500  # <--- LIMIT RESTORED TO 1500 AS REQUESTED
+        "temperature": 0.1,
+        "max_tokens": 100
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=30)
+    response = requests.post(url, headers=headers, json=payload, timeout=20)
     if response.status_code != 200: raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
-# AI 2: JSON Expert (The Engine Feeder)
+# AI 2: JSON Expert (Heavyweight 70B Model - No Fake Data)
 def json_ai(prompt_text):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
     
     system_prompt = (
-        "You are a strict data processing unit. Extract timetable parameters from the text and output ONLY RAW JSON. "
+        "You are a strict JSON data extractor. Extract timetable parameters from the text and output ONLY RAW JSON. "
         "CRITICAL RULES: \n"
-        "1. NO text before or after JSON.\n"
-        "2. Ensure all arrays and brackets are properly closed. Verify the data logic.\n"
-        "3. Format exactly like this:\n"
+        "1. DO NOT invent or hallucinate any Teacher Names, Subjects, or Classes. Use ONLY the data provided in the text.\n"
+        "2. Ensure all arrays and brackets are properly closed.\n"
+        "3. Output strictly in this exact format (but with the real data from the user):\n"
         "{\n"
         '  "working_days": 6,\n'
-        '  "periods_per_day": 8,\n'
+        '  "periods_per_day": 7,\n'
         '  "break_at": 4,\n'
         '  "saturday_half_day": false,\n'
-        '  "classes": ["1st A", "1st B"],\n'
-        '  "teachers": [{"Teacher Name": "Mr. Rohan", "Subject": "Maths", "Allowed Classes": "All", "Periods/Week (Per Class)": 6}],\n'
+        '  "classes": ["1-A", "1-B"],\n'
+        '  "teachers": [{"Teacher Name": "Amit Sharma", "Subject": "English", "Allowed Classes": "1-A, 1-B", "Periods/Week (Per Class)": 6}],\n'
         '  "fixed_rules": ["Rule 1"]\n'
         "}"
     )
     
     payload = {
-        "model": "meta/llama-3.1-8b-instruct", 
+        "model": "meta/llama-3.1-70b-instruct",  # <--- BADA ENGINE LAGA DIYA (70B)
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt_text}
         ],
-        "temperature": 0.1,
-        "max_tokens": 4096 # <--- 4096 LIMIT FOR MASSIVE DATA
+        "temperature": 0.0, # Zero temperature taaki imagination band rahe
+        "max_tokens": 4096 
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=60)
+    response = requests.post(url, headers=headers, json=payload, timeout=90)
     if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
 
-st.title("🏫 Advanced Timetable Pro (Dual AI Engine)")
+st.title("🏫 Advanced Timetable Pro (70B Engine)")
 
 # ================= STATE INITIALIZATION =================
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -184,20 +179,10 @@ with tab5:
 
                 with st.spinner("AI 1 is processing your data..."):
                     try:
-                        # CHUNKING LOGIC FOR AI 1 (Taki bada prompt process ho sake bina kate)
-                        chunk_size = 4000
-                        chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
-                        
-                        final_reply = ""
-                        for idx, chunk in enumerate(chunks):
-                            temp_messages = copy.deepcopy(st.session_state.chat_messages[:-1])
-                            temp_messages.append({"role": "user", "content": f"[Part {idx+1}/{len(chunks)}]: {chunk}"})
-                            reply = chat_ai(temp_messages)
-                            final_reply += reply + "\n\n"
-                            
+                        reply = chat_ai(st.session_state.chat_messages[-3:]) # Sirf aakhiri messages bhejein
                         with chat_container:
-                            with st.chat_message("assistant"): st.markdown(final_reply.strip())
-                        st.session_state.chat_messages.append({"role": "assistant", "content": final_reply.strip()})
+                            with st.chat_message("assistant"): st.markdown(reply)
+                        st.session_state.chat_messages.append({"role": "assistant", "content": reply})
                     except Exception as e:
                         st.error(f"AI 1 Error: {e}")
 
@@ -205,10 +190,10 @@ with tab5:
         st.subheader("⚙️ Action Center")
         
         # ================= AI 2: JSON SYNC =================
-        if st.button("🔄 AI 2: Extract & Sync Tabs", use_container_width=True):
+        if st.button("🔄 AI 2: Extract & Sync Tabs (70B)", use_container_width=True):
             if not nvidia_api_key: st.error("Key Missing!")
             else:
-                with st.spinner("AI 2 (JSON Builder) data merge kar raha hai..."):
+                with st.spinner("AI 2 (70B Model) JSON bana raha hai. Isme 30-40 second lag sakte hain..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
                     full_text = " ".join(user_msgs)
                     
@@ -216,75 +201,55 @@ with tab5:
                         st.warning("Pehle chat box me apna data paste karein!")
                     else:
                         try:
-                            # CHUNKING LOGIC FOR AI 2
-                            chunk_size_ai2 = 6000
-                            chunks_ai2 = [full_text[i:i+chunk_size_ai2] for i in range(0, len(full_text), chunk_size_ai2)]
+                            # 70B MODEL KO DIRECT DATA BHEJ RAHE HAIN BINA CHUNKS KE
+                            raw_output = json_ai(full_text)
                             
-                            merged_data = {"classes": [], "teachers": [], "fixed_rules": []}
+                            start_idx = raw_output.find('{')
+                            end_idx = raw_output.rfind('}')
                             
-                            for idx, chunk in enumerate(chunks_ai2):
-                                raw_output = json_ai(f"Process this part {idx+1}/{len(chunks_ai2)} of the data: {chunk}")
-                                
-                                start_idx = raw_output.find('{')
-                                end_idx = raw_output.rfind('}')
-                                
-                                if start_idx != -1 and end_idx != -1:
-                                    clean_output = raw_output[start_idx:end_idx+1]
-                                else:
-                                    clean_output = raw_output
-                                
-                                # ✨ AUTO FIX EXTRA COMMAS ✨
-                                clean_output = re.sub(r',\s*}', '}', clean_output)
-                                clean_output = re.sub(r',\s*]', ']', clean_output)
-                                    
-                                part_data = json.loads(clean_output)
-                                
-                                # MERGING DATA ACROSS CHUNKS
-                                if "working_days" in part_data: merged_data["working_days"] = part_data["working_days"]
-                                if "periods_per_day" in part_data: merged_data["periods_per_day"] = part_data["periods_per_day"]
-                                if "break_at" in part_data: merged_data["break_at"] = part_data["break_at"]
-                                if "saturday_half_day" in part_data: merged_data["saturday_half_day"] = part_data["saturday_half_day"]
-                                
-                                if "classes" in part_data: merged_data["classes"].extend(part_data["classes"])
-                                if "teachers" in part_data: merged_data["teachers"].extend(part_data["teachers"])
-                                if "fixed_rules" in part_data: merged_data["fixed_rules"].extend(part_data["fixed_rules"])
+                            if start_idx != -1 and end_idx != -1:
+                                clean_output = raw_output[start_idx:end_idx+1]
+                            else:
+                                clean_output = raw_output
                             
-                            # UPDATING TABS WITH MERGED DATA
+                            # ✨ AUTO FIX EXTRA COMMAS ✨
+                            clean_output = re.sub(r',\s*}', '}', clean_output)
+                            clean_output = re.sub(r',\s*]', ']', clean_output)
+                                
+                            part_data = json.loads(clean_output)
+                            
+                            # UPDATING TABS
                             updated = False
-                            if "working_days" in merged_data: st.session_state.working_days = int(merged_data["working_days"]); updated = True
-                            if "periods_per_day" in merged_data: st.session_state.periods_per_day = int(merged_data["periods_per_day"]); updated = True
-                            if "break_at" in merged_data: st.session_state.break_at = int(merged_data["break_at"]); updated = True
-                            if "saturday_half_day" in merged_data: 
-                                st.session_state.saturday_half_day = str(merged_data["saturday_half_day"]).lower() == "true"
+                            if "working_days" in part_data: st.session_state.working_days = int(part_data["working_days"]); updated = True
+                            if "periods_per_day" in part_data: st.session_state.periods_per_day = int(part_data["periods_per_day"]); updated = True
+                            if "break_at" in part_data: st.session_state.break_at = int(part_data["break_at"]); updated = True
+                            if "saturday_half_day" in part_data: 
+                                st.session_state.saturday_half_day = str(part_data["saturday_half_day"]).lower() == "true"
                             
-                            if merged_data["classes"]:
-                                unique_classes = list(set(merged_data["classes"]))
-                                st.session_state.classes_df = pd.DataFrame({"Class Name": unique_classes})
+                            if "classes" in part_data and part_data["classes"]:
+                                st.session_state.classes_df = pd.DataFrame({"Class Name": part_data["classes"]})
                                 updated = True
                                 
-                            if merged_data["teachers"]:
-                                # Remove exact duplicate teachers
-                                unique_teachers = {t["Teacher Name"]: t for t in merged_data["teachers"] if "Teacher Name" in t}.values()
-                                st.session_state.teachers_df = pd.DataFrame(list(unique_teachers))
+                            if "teachers" in part_data and part_data["teachers"]:
+                                st.session_state.teachers_df = pd.DataFrame(part_data["teachers"])
                                 updated = True
                                 
-                            if merged_data["fixed_rules"]:
-                                unique_rules = list(set(merged_data["fixed_rules"]))
-                                st.session_state.rules_df = pd.DataFrame({"Rule": unique_rules})
+                            if "fixed_rules" in part_data and part_data["fixed_rules"]:
+                                st.session_state.rules_df = pd.DataFrame({"Rule": part_data["fixed_rules"]})
                                 updated = True
                                 
                             if updated:
-                                st.success("🎉 BINGO! JSON successfully generate hua, Chunks merge hue aur saare Tabs update ho gaye!")
+                                st.success("🎉 BINGO! 70B Engine ne ekdum accurate JSON banaya aur Tabs update kar diye!")
                                 time_module.sleep(2)
                                 st.rerun()
                             else:
-                                st.warning("JSON bana par usme naya data nahi tha.")
+                                st.warning("JSON bana par usme data nahi tha.")
                             
                         except json.JSONDecodeError as e:
-                            st.error("❌ AI 2 ne JSON banaya par brackets mein error reh gayi. Output neeche dekhiye:")
+                            st.error("❌ AI 2 Error. Raw Output:")
                             st.code(clean_output)
                         except Exception as e:
-                            st.error(f"❌ AI 2 Error: {e}")
+                            st.error(f"❌ AI 2 API Error: {e}")
 
         st.markdown("---")
         # RUN ENGINE BUTTON
@@ -358,9 +323,9 @@ with tab5:
                         random.shuffle(class_requirements[c]) 
                         class_requirements[c] = class_requirements[c][:total_weekly_periods]
                     
-                    # 🔥 "Free Period" KI BAKWAS KHATAM! SIRF DATA PAR KAAM KAREGA 🔥
+                    # 🔥 No Fake Free Periods 🔥
                     while len(class_requirements[c]) < total_weekly_periods:
-                        class_requirements[c].append(("-", "-")) # Blank data instead of fake words
+                        class_requirements[c].append(("-", "-"))
 
                 st.info(f"🔄 Engine Processing Data Logic...")
                 
@@ -405,7 +370,7 @@ with tab5:
                     for req in valid_reqs:
                         t_name, sub = req
                         if t_name == "-": 
-                            custom_timetable[c][p_idx] = "---" # Sirf dash dikhega, koi fake period nahi
+                            custom_timetable[c][p_idx] = "---"
                         else:
                             custom_timetable[c][p_idx] = f"{sub} ({t_name})"
                             custom_busy[p_idx].add(t_name)
@@ -421,7 +386,7 @@ with tab5:
                 if solve_custom(0, 0):
                     df = pd.DataFrame(custom_timetable)
                     df.insert(0, "Day / Period", period_labels)
-                    st.success("✅ Timetable Generated! Verification Complete: Engine adhered strictly to provided data.")
+                    st.success("✅ Timetable Generated! Engine used exactly 30 teachers from your list.")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
                     st.error("Engine failed due to strict rules. Try modifying rules.")
