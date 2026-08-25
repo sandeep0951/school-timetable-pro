@@ -21,24 +21,26 @@ st.set_page_config(page_title="Advanced Timetable Pro (Dual AI)", layout="wide")
 # ================= SECRETS BYPASS (SIDEBAR) =================
 with st.sidebar:
     st.header("🔑 API Keys Setup")
-    st.markdown("Dual AI Architecture:\n1. Chat Expert (70B)\n2. JSON Builder (8B)")
+    st.markdown("Dual AI Architecture:\n1. Chat Expert (8B)\n2. JSON Builder (8B)")
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
     st.info("🛡️ Bina double quotes ke key dalein.")
 
-# AI 1: Chat Expert (Language Samajhne wala - Ab Fast Model par)
+# ================= DUAL AI FUNCTIONS =================
+# AI 1: Chat Expert (Language Samajhne wala) - TIMEOUT 40s
 def chat_ai(messages):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
     payload = {
-        "model": "meta/llama-3.1-8b-instruct",  # Yahan 70B ki jagah fast 8B laga diya
+        "model": "meta/llama-3.1-8b-instruct", 
         "messages": messages,
         "temperature": 0.3,
         "max_tokens": 500
     }
-    # Time limit badhakar 40 second kar di hai
     response = requests.post(url, headers=headers, json=payload, timeout=40)
     if response.status_code != 200: raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
+
+# AI 2: JSON Expert (Sirf Data nikalne wala) - TIMEOUT 60s
 def json_ai(prompt_text):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
@@ -58,7 +60,7 @@ def json_ai(prompt_text):
     )
     
     payload = {
-        "model": "meta/llama-3.1-8b-instruct", # Bijli ki tarah tez JSON ke liye
+        "model": "meta/llama-3.1-8b-instruct", 
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt_text}
@@ -66,7 +68,7 @@ def json_ai(prompt_text):
         "temperature": 0.1,
         "max_tokens": 1500
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=20)
+    response = requests.post(url, headers=headers, json=payload, timeout=60)
     if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
@@ -134,12 +136,14 @@ with tab5:
         col_c1, col_c2 = st.columns([7, 3])
         with col_c1: st.subheader("💬 AI 1: Prompt Expert")
         with col_c2:
-            if st.button("🗑️ Clear"): del st.session_state["chat_messages"]; st.rerun()
+            if st.button("🗑️ Clear"): 
+                del st.session_state["chat_messages"]
+                st.rerun()
 
         if "chat_messages" not in st.session_state:
             st.session_state.chat_messages = [
                 {"role": "system", "content": "Aap ek Timetable assistant ho. User ka data padho aur Hindi/Hinglish me batao ki sab sahi he ya kuch bacha hai."},
-                {"role": "assistant", "content": "Namaste! Main AI-1 hoon. Kripya apna poora data bhejein, main padh kar confirm karunga."}
+                {"role": "assistant", "content": "Namaste Sandeep Sir! Main AI-1 hoon. Kripya apna poora data bhejein, main padh kar confirm karunga."}
             ]
 
         chat_container = st.container(height=450)
@@ -172,7 +176,7 @@ with tab5:
     with col_engine:
         st.subheader("⚙️ Action Center")
         
-# ================= AI 2: JSON SYNC =================
+        # ================= AI 2: JSON SYNC =================
         if st.button("🔄 AI 2: Convert to JSON & Sync", use_container_width=True):
             if not nvidia_api_key: st.error("Key Missing!")
             else:
@@ -193,7 +197,6 @@ with tab5:
                             end_idx = raw_output.rfind('}')
                             
                             if start_idx != -1 and end_idx != -1:
-                                # Sirf { aur } ke beech ka data uthayega
                                 clean_output = raw_output[start_idx:end_idx+1]
                             else:
                                 clean_output = raw_output
