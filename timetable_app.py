@@ -7,7 +7,7 @@ import random
 import sys
 import copy
 import re
-import requests  # DIRECT CONNECTION LIBRARY
+import requests
 
 # Attempt to import Google OR-Tools
 try:
@@ -16,41 +16,66 @@ try:
 except ImportError:
     ORTOOLS_AVAILABLE = False
 
-st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
+st.set_page_config(page_title="Advanced Timetable Pro (Dual AI)", layout="wide")
 
 # ================= SECRETS BYPASS (SIDEBAR) =================
 with st.sidebar:
     st.header("🔑 API Keys Setup")
-    st.markdown("No OpenAI library! Direct Connection to **Nvidia Llama 70B**.")
+    st.markdown("Dual AI Architecture:\n1. Chat Expert (70B)\n2. JSON Builder (8B)")
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
     st.info("🛡️ Bina double quotes ke key dalein.")
 
-# ================= DIRECT NVIDIA API CALL FUNCTION =================
-def call_nvidia_api(messages, temp=0.2, tokens=1000):
+# ================= DUAL AI FUNCTIONS =================
+# AI 1: Chat Expert (Language Samajhne wala)
+def chat_ai(messages):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {nvidia_api_key}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
     payload = {
-        "model": "meta/llama-3.1-70b-instruct",
+        "model": "meta/llama-3.1-70b-instruct", 
         "messages": messages,
-        "temperature": temp,
-        "max_tokens": tokens
+        "temperature": 0.3,
+        "max_tokens": 500
     }
+    response = requests.post(url, headers=headers, json=payload, timeout=20)
+    if response.status_code != 200: raise Exception(f"Chat AI Error: {response.text}")
+    return response.json()["choices"][0]["message"]["content"]
+
+# AI 2: JSON Expert (Sirf Data nikalne wala)
+def json_ai(prompt_text):
+    url = "https://integrate.api.nvidia.com/v1/chat/completions"
+    headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
     
-    response = requests.post(url, headers=headers, json=payload)
+    system_prompt = (
+        "You are a strict data extractor. Extract 8 parameters from the user text and output ONLY RAW JSON. "
+        "No explanations, no markdown tags. Output exactly like this format:\n"
+        "{\n"
+        '  "working_days": 6,\n'
+        '  "periods_per_day": 8,\n'
+        '  "break_at": 4,\n'
+        '  "saturday_half_day": false,\n'
+        '  "classes": ["1st A", "1st B"],\n'
+        '  "teachers": [{"Teacher Name": "Mr. Rohan", "Subject": "Maths", "Allowed Classes": "All", "Periods/Week (Per Class)": 6}],\n'
+        '  "fixed_rules": ["Rule 1", "Rule 2"]\n'
+        "}"
+    )
     
-    if response.status_code != 200:
-        raise Exception(f"API Error {response.status_code}: {response.text}")
-        
+    payload = {
+        "model": "meta/llama-3.1-8b-instruct", # Bijli ki tarah tez JSON ke liye
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt_text}
+        ],
+        "temperature": 0.1,
+        "max_tokens": 1500
+    }
+    response = requests.post(url, headers=headers, json=payload, timeout=20)
+    if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
 
-st.title("🏫 Advanced Timetable Pro (Direct Nvidia Connection)")
+st.title("🏫 Advanced Timetable Pro (Dual AI Engine)")
 
 # ================= STATE INITIALIZATION =================
-# TAB 1 States
 if "working_days" not in st.session_state: st.session_state.working_days = 6
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
 if "break_at" not in st.session_state: st.session_state.break_at = 4
@@ -60,11 +85,9 @@ if "periods_timing_df" not in st.session_state:
     slots.insert(4, {"Slot": "LUNCH BREAK", "Duration (Mins)": 40})
     st.session_state.periods_timing_df = pd.DataFrame(slots)
 
-# TAB 2 States
 if "classes_df" not in st.session_state: 
     st.session_state.classes_df = pd.DataFrame({"Class Name": ["1st A", "1st B"]})
 
-# TAB 3 States
 if "teachers_df" not in st.session_state:
     st.session_state.teachers_df = pd.DataFrame({
         "Teacher Name": ["Mr. Rohan Das", "Coach Ravi"],
@@ -73,7 +96,6 @@ if "teachers_df" not in st.session_state:
         "Periods/Week (Per Class)": [6, 4] 
     })
 
-# TAB 4 States (Rules table)
 if "rules_df" not in st.session_state:
     st.session_state.rules_df = pd.DataFrame({"Rule": []})
 
@@ -90,24 +112,21 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
-        st.session_state.working_days = st.number_input("1. Schedule Weekly (Working Days)", min_value=1, max_value=7, value=int(st.session_state.working_days))
-        st.session_state.periods_per_day = st.number_input("2. Period Timing (Periods per Day)", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
+        st.session_state.working_days = st.number_input("1. Working Days", min_value=1, max_value=7, value=int(st.session_state.working_days))
+        st.session_state.periods_per_day = st.number_input("2. Periods per Day", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
         st.session_state.break_at = st.number_input("Lunch Break AFTER period?", min_value=1, max_value=15, value=int(st.session_state.break_at))
-        st.session_state.saturday_half_day = st.checkbox("4. Weekend Half Day (Saturday Half-Day)?", value=st.session_state.saturday_half_day)
+        st.session_state.saturday_half_day = st.checkbox("4. Saturday Half-Day?", value=st.session_state.saturday_half_day)
     with col2:
-        st.markdown("**School Timing (Durations):**")
+        st.markdown("**School Timing:**")
         st.session_state.periods_timing_df = st.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
 
 with tab2:
-    st.markdown("**1. Total Classes with Sections:**")
     st.session_state.classes_df = st.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
 
 with tab3:
-    st.markdown("**1, 2, 3, 4: Teachers Name, Subjects, Classes, and Weekly Logic (Periods/Week):**")
     st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
 
 with tab4:
-    st.markdown("**1. Rules from Prompt:**")
     st.session_state.rules_df = st.data_editor(st.session_state.rules_df, num_rows="dynamic", use_container_width=True)
 
 with tab5:
@@ -115,31 +134,14 @@ with tab5:
     
     with col_chat:
         col_c1, col_c2 = st.columns([7, 3])
-        with col_c1: st.subheader("💬 1. Chat Box")
+        with col_c1: st.subheader("💬 AI 1: Prompt Expert")
         with col_c2:
-            if st.button("🗑️ Clear Chat"):
-                del st.session_state["chat_messages"]
-                st.rerun()
+            if st.button("🗑️ Clear"): del st.session_state["chat_messages"]; st.rerun()
 
         if "chat_messages" not in st.session_state:
             st.session_state.chat_messages = [
-                {
-                    "role": "system", 
-                    "content": (
-                        "You are an Expert Timetable Consultant. Your goal is to collect data for 4 Tabs:\n"
-                        "Tab 1: Timings (Working days, Periods/day, Break, Weekend rules)\n"
-                        "Tab 2: Classes & Sections\n"
-                        "Tab 3: Teachers (Name, Subject, Classes, Periods/Week per class)\n"
-                        "Tab 4: Rules (Limits, class teacher periods, etc.)\n\n"
-                        "When user sends data:\n"
-                        "1. Identify which Tab's info was provided.\n"
-                        "2. Point out what is STILL MISSING.\n"
-                        "3. CRITICAL: Analyze the rules and data. If a teacher's workload is practically impossible or contradicts rules, point it out!\n"
-                        "4. Do NOT generate JSON in chat. Just analyze and collect.\n"
-                        "5. Once user says 'DONE' or confirms everything is provided, reply EXACTLY: '✅ All data verified! Kripya right side par Sync Button dabayein.'"
-                    )
-                },
-                {"role": "assistant", "content": "Namaste Sandeep Sir! Main Direct Nvidia Engine hoon. Kripya apna data bhejein."}
+                {"role": "system", "content": "Aap ek Timetable assistant ho. User ka data padho aur Hindi/Hinglish me batao ki sab sahi he ya kuch bacha hai."},
+                {"role": "assistant", "content": "Namaste! Main AI-1 hoon. Kripya apna poora data bhejein, main padh kar confirm karunga."}
             ]
 
         chat_container = st.container(height=450)
@@ -150,171 +152,74 @@ with tab5:
                         st.markdown(message["content"])
 
         with st.form("chat_input_form", clear_on_submit=True):
-            prompt = st.text_area("Apna data yahan paste karein (Fixed size box):", height=120)
-            submit_chat = st.form_submit_button("Send 🚀")
+            prompt = st.text_area("Apna data yahan paste karein:", height=120)
+            submit_chat = st.form_submit_button("Send to AI 1 🚀")
 
         if submit_chat and prompt:
             st.session_state.chat_messages.append({"role": "user", "content": prompt})
             with chat_container:
                 with st.chat_message("user"): st.markdown(prompt)
 
-            if not nvidia_api_key: st.error("❌ Nvidia API Key missing! Kripya Left Sidebar mein key dalein.")
+            if not nvidia_api_key: st.error("❌ Key Missing!")
             else:
-                with st.spinner("Nvidia is analyzing your logic..."):
+                with st.spinner("AI 1 is reading your prompt..."):
                     try:
-                        chunk_size = 2500
-                        prompt_chunks = [prompt[i:i+chunk_size] for i in range(0, len(prompt), chunk_size)]
-                        
-                        final_ai_reply = ""
-                        for c_idx, chunk_text in enumerate(prompt_chunks):
-                            messages_to_send = [
-                                st.session_state.chat_messages[0],
-                                {"role": "user", "content": f"[Data Part {c_idx+1}/{len(prompt_chunks)}]: {chunk_text}\n\nAnalyze this part based on your system instructions."}
-                            ]
-                            
-                            for attempt in range(3):
-                                try:
-                                    # DIRECT API CALL INSTEAD OF OPENAI CLIENT
-                                    reply = call_nvidia_api(messages_to_send, temp=0.2, tokens=500)
-                                    final_ai_reply += reply + "\n\n"
-                                    time_module.sleep(1)
-                                    break
-                                except Exception as chunk_err:
-                                    st.error(f"Attempt {attempt+1} Failed: {chunk_err}")
-                                    time_module.sleep(2)
-                                        
+                        reply = chat_ai(st.session_state.chat_messages)
                         with chat_container:
-                            with st.chat_message("assistant"): st.markdown(final_ai_reply.strip())
-                        st.session_state.chat_messages.append({"role": "assistant", "content": final_ai_reply.strip()})
-                        st.rerun()
+                            with st.chat_message("assistant"): st.markdown(reply)
+                        st.session_state.chat_messages.append({"role": "assistant", "content": reply})
                     except Exception as e:
-                        st.error(f"System Error: {e}")
+                        st.error(f"AI 1 Error: {e}")
 
     with col_engine:
         st.subheader("⚙️ Action Center")
         
-        # SYNC BUTTON (Direct API Call for JSON)
-        if st.button("🔄 Sync Button (Extract Data)", use_container_width=True):
-            if not nvidia_api_key: st.error("Nvidia API Key missing! Kripya Left Sidebar mein key dalein.")
+        # ================= AI 2: JSON SYNC =================
+        if st.button("🔄 AI 2: Convert to JSON & Sync", use_container_width=True):
+            if not nvidia_api_key: st.error("Key Missing!")
             else:
-                with st.spinner("Nvidia Llama 70B is building strictly formatted JSON..."):
+                with st.spinner("AI 2 (JSON Builder) is working..."):
                     user_msgs = [msg['content'] for msg in st.session_state.chat_messages if msg["role"] == "user"]
+                    full_text = " ".join(user_msgs)
                     
-                    master_working_days = st.session_state.working_days
-                    master_periods_per_day = st.session_state.periods_per_day
-                    master_break_at = st.session_state.break_at
-                    master_saturday_half_day = st.session_state.saturday_half_day
-                    all_classes = []
-                    all_rules = []
-                    teacher_map = {}
-                    
-                    for idx, part in enumerate(user_msgs):
-                        if part.strip().lower() == "done" or len(part) < 5:
-                            continue 
-                            
-                        st.toast(f"Extracting JSON from data part {idx+1} of {len(user_msgs)}...")
-                        
-                        extraction_prompt = (
-                            "You are a strict JSON data extractor. Read this text chunk carefully and extract timing, classes, teachers (with Periods/Week logic), weekend half day info, AND ALL RULES.\n"
-                            'Format EXACTLY like this JSON schema. OUTPUT ONLY RAW JSON without any markdown or conversational text.\n'
-                            '{\n'
-                            '  "working_days": 6,\n'
-                            '  "periods_per_day": 8,\n'
-                            '  "break_at": 4,\n'
-                            '  "saturday_half_day": false,\n'
-                            '  "classes": ["1st A", "1st B"],\n'
-                            '  "teachers": [{"Teacher Name": "Mr. Rohan Das", "Subject": "Maths", "Allowed Classes": "All", "Periods/Week (Per Class)": 6}],\n'
-                            '  "fixed_rules": ["1st period on Monday is Class Teacher period", "Teacher cannot teach more than 3 continuous periods"]\n'
-                            '}\n\n'
-                            "Text Chunk:\n" + part
-                        )
-                        
+                    if len(full_text) < 10:
+                        st.warning("Pehle chat box me kuch data bhejein!")
+                    else:
                         try:
-                            # DIRECT JSON API CALL
-                            messages_to_send = [{"role": "user", "content": extraction_prompt}]
-                            raw_output = call_nvidia_api(messages_to_send, temp=0.1, tokens=2000)
+                            raw_output = json_ai(full_text)
                             
+                            # Clean up the output (remove markdown)
                             clean_output = raw_output.strip()
+                            if clean_output.startswith("```json"): clean_output = clean_output[7:]
+                            elif clean_output.startswith("```"): clean_output = clean_output[3:]
+                            if clean_output.endswith("```"): clean_output = clean_output[:-3]
                             
-                            # MARKDOWN CLEANER
-                            if clean_output.startswith("```json"):
-                                clean_output = clean_output[7:]
-                            elif clean_output.startswith("```"):
-                                clean_output = clean_output[3:]
-                            if clean_output.endswith("```"):
-                                clean_output = clean_output[:-3]
-                                
                             clean_output = clean_output.strip()
-                            
                             part_data = json.loads(clean_output)
                             
-                            if part_data.get("working_days"): master_working_days = int(part_data["working_days"])
-                            if part_data.get("periods_per_day"): master_periods_per_day = int(part_data["periods_per_day"])
-                            if part_data.get("break_at"): master_break_at = int(part_data["break_at"])
+                            # Update parameters
+                            if "working_days" in part_data: st.session_state.working_days = int(part_data["working_days"])
+                            if "periods_per_day" in part_data: st.session_state.periods_per_day = int(part_data["periods_per_day"])
+                            if "break_at" in part_data: st.session_state.break_at = int(part_data["break_at"])
+                            if "saturday_half_day" in part_data: 
+                                st.session_state.saturday_half_day = str(part_data["saturday_half_day"]).lower() == "true"
                             
-                            if "saturday_half_day" in part_data:
-                                if str(part_data["saturday_half_day"]).lower() == "true":
-                                    master_saturday_half_day = True
-                                elif str(part_data["saturday_half_day"]).lower() == "false":
-                                    master_saturday_half_day = False
-                            
-                            if part_data.get("classes"): all_classes.extend(part_data["classes"])
-                            if part_data.get("fixed_rules"): all_rules.extend(part_data["fixed_rules"])
-                            
-                            if part_data.get("teachers"):
-                                for t in part_data["teachers"]:
-                                    name = t.get("Teacher Name", "Unknown").strip()
-                                    sub = t.get("Subject", "").strip()
-                                    cls = t.get("Allowed Classes", "").strip()
-                                    p_week = t.get("Periods/Week (Per Class)", master_working_days) 
-                                    
-                                    if name in teacher_map:
-                                        existing_subs = set([s.strip() for s in teacher_map[name]["Subject"].split(",")])
-                                        new_subs = set([s.strip() for s in sub.split(",")])
-                                        teacher_map[name]["Subject"] = ", ".join(existing_subs.union(new_subs))
-                                        
-                                        existing_cls = set([c.strip() for c in teacher_map[name]["Allowed Classes"].split(",")])
-                                        new_cls = set([c.strip() for c in cls.split(",")])
-                                        if "All" in existing_cls or "All" in new_cls:
-                                            teacher_map[name]["Allowed Classes"] = "All"
-                                        else:
-                                            teacher_map[name]["Allowed Classes"] = ", ".join(existing_cls.union(new_cls))
-                                            
-                                        teacher_map[name]["Periods/Week (Per Class)"] = p_week
-                                    else:
-                                        t["Periods/Week (Per Class)"] = p_week
-                                        teacher_map[name] = t
-                            
-                            time_module.sleep(2) 
+                            if "classes" in part_data and part_data["classes"]:
+                                st.session_state.classes_df = pd.DataFrame({"Class Name": part_data["classes"]})
+                                
+                            if "teachers" in part_data and part_data["teachers"]:
+                                st.session_state.teachers_df = pd.DataFrame(part_data["teachers"])
+                                
+                            if "fixed_rules" in part_data and part_data["fixed_rules"]:
+                                st.session_state.rules_df = pd.DataFrame({"Rule": part_data["fixed_rules"]})
+                                
+                            st.success("✅ AI 2 ne JSON bana diya aur Tabs update kar diye!")
+                            st.rerun()
+                        except json.JSONDecodeError:
+                            st.error("❌ AI 2 failed to build valid JSON. Raw output below:")
+                            st.code(clean_output)
                         except Exception as e:
-                            st.error(f"❌ DATA SYNC ERROR: {e}")
-                            st.info("Direct Connection Check: Agar error 'Unauthorized' hai, toh API Key me problem hai. Agar 'JSONDecodeError' hai toh text format issue hai.")
-                            continue
-                    
-                    if not teacher_map:
-                        st.warning("⚠️ Koi naya data Sync nahi hua! Kripya check karein upar error toh nahi aaya.")
-                    else:
-                        st.session_state.working_days = int(max(1, min(7, master_working_days)))
-                        st.session_state.periods_per_day = int(max(1, min(20, master_periods_per_day)))
-                        st.session_state.break_at = int(max(1, min(15, master_break_at)))
-                        st.session_state.saturday_half_day = master_saturday_half_day
-                        
-                        unique_classes = sorted(list(set(all_classes)))
-                        if unique_classes:
-                            st.session_state.classes_df = pd.DataFrame({"Class Name": unique_classes})
-                            
-                        if teacher_map:
-                            st.session_state.teachers_df = pd.DataFrame(list(teacher_map.values()))
-                            
-                        if all_rules:
-                            cleaned_rules = []
-                            for r in all_rules:
-                                rule_text = r.get("rule", r) if isinstance(r, dict) else r
-                                cleaned_rules.append(str(rule_text))
-                            st.session_state.rules_df = pd.DataFrame({"Rule": list(set(cleaned_rules))})
-                            
-                        st.success("✅ Data Sync Successful! All Tabs updated. Now run the Engine.")
-                        st.rerun()
+                            st.error(f"❌ AI 2 Error: {e}")
 
         st.markdown("---")
         # RUN ENGINE BUTTON
@@ -335,8 +240,7 @@ with tab5:
                     r_lower = r.lower()
                     if "consecutive" in r_lower or "continuous" in r_lower:
                         nums = re.findall(r'\d+', r_lower)
-                        if nums:
-                            rule_max_consecutive = int(nums[0])
+                        if nums: rule_max_consecutive = int(nums[0])
                 
                 days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
                 period_labels = []
@@ -345,16 +249,13 @@ with tab5:
                 
                 for d in range(working_days):
                     day_name = days_str[d]
-                    if day_name.lower() == "saturday" and is_sat_half:
-                        current_day_periods = 4
-                    else:
-                        current_day_periods = periods_per_day
+                    if day_name.lower() == "saturday" and is_sat_half: current_day_periods = 4
+                    else: current_day_periods = periods_per_day
                     
                     for i in range(1, current_day_periods + 1):
                         global_p_idx += 1
                         period_labels.append(f"{day_name} - P{i}")
                         valid_periods.append(global_p_idx)
-                        
                         if i == break_at and not (day_name.lower() == "saturday" and is_sat_half): 
                             period_labels.append(f"{day_name} - LUNCH")
                 
@@ -365,20 +266,16 @@ with tab5:
                         if "LUNCH" in label: initial_timetable[c][idx] = "LUNCH / BREAK"
                             
                 initial_busy_teachers = {i: set() for i in range(len(period_labels))}
-                
                 class_requirements = {c: [] for c in classes_list}
+                
                 for t in teachers_list:
                     t_name = t.get("Teacher Name", "")
                     t_sub_raw = str(t.get("Subject", ""))
                     t_allowed_str = str(t.get("Allowed Classes", "")).strip()
-                    
-                    try:
-                        p_per_class = int(t.get("Periods/Week (Per Class)", working_days))
-                    except:
-                        p_per_class = working_days
+                    try: p_per_class = int(t.get("Periods/Week (Per Class)", working_days))
+                    except: p_per_class = working_days
                         
-                    if p_per_class > total_weekly_periods:
-                         p_per_class = total_weekly_periods
+                    if p_per_class > total_weekly_periods: p_per_class = total_weekly_periods
 
                     if str(t_allowed_str).lower() == "all" or str(t_allowed_str) == "":
                         actual_classes = classes_list
@@ -391,29 +288,14 @@ with tab5:
                             for _ in range(p_per_class):
                                 class_requirements[c].append((t_name, sub))
 
-                teacher_global_load = {}
-                for c in classes_list:
-                    for (t_name, sub) in class_requirements[c]:
-                        teacher_global_load[t_name] = teacher_global_load.get(t_name, 0) + 1
-                
-                sanity_errors = []
-                for (t_name, load) in teacher_global_load.items():
-                    if t_name not in ["Library Master", "Self-Study"] and load > total_weekly_periods:
-                        sanity_errors.append(f"Teacher '{t_name}' hafte ki {load} classes mili hain, par periods {total_weekly_periods} hain. Clash possible.")
-                
-                if sanity_errors:
-                    st.error("🚨 WEEKLY DATA CONTRADICTIONS DETECTED:")
-                    for err in sanity_errors: st.write(f"- {err}")
-
                 for c in classes_list:
                     if len(class_requirements[c]) > total_weekly_periods:
                         random.shuffle(class_requirements[c]) 
                         class_requirements[c] = class_requirements[c][:total_weekly_periods]
-                        
                     while len(class_requirements[c]) < total_weekly_periods:
                         class_requirements[c].append(("Free Period", ""))
 
-                st.info(f"🔄 Running Python Engine for {working_days} Days...")
+                st.info(f"🔄 Running Custom Engine...")
                 
                 custom_timetable = copy.deepcopy(initial_timetable)
                 custom_busy = copy.deepcopy(initial_busy_teachers)
@@ -421,7 +303,7 @@ with tab5:
                 custom_start_time = time_module.time()
                 
                 def solve_custom(p_idx, c_idx):
-                    if time_module.time() - custom_start_time > 20.0: return False
+                    if time_module.time() - custom_start_time > 15.0: return False
                     if p_idx >= len(period_labels): return True
                     if "LUNCH" in period_labels[p_idx]: return solve_custom(p_idx + 1, 0)
                     
@@ -448,23 +330,19 @@ with tab5:
                                         if "LUNCH" in period_labels[back_p]: break
                                         if t_name_check in custom_busy[back_p]: consecutive += 1
                                         else: break
-                                    if consecutive >= rule_max_consecutive:
-                                        continue 
-                                
+                                    if consecutive >= rule_max_consecutive: continue 
                                 valid_reqs.append(req)
                     
                     random.shuffle(valid_reqs) 
                     
                     for req in valid_reqs:
                         t_name, sub = req
-                        if t_name == "Free Period":
-                            custom_timetable[c][p_idx] = "Free Period"
+                        if t_name == "Free Period": custom_timetable[c][p_idx] = "Free Period"
                         else:
                             custom_timetable[c][p_idx] = f"{sub} ({t_name})"
                             custom_busy[p_idx].add(t_name)
                         
                         custom_reqs[c].remove(req) 
-                        
                         if solve_custom(next_p_idx, next_c_idx): return True
                         
                         custom_timetable[c][p_idx] = "Free"
@@ -472,99 +350,10 @@ with tab5:
                         custom_reqs[c].append(req) 
                     return False
 
-                custom_success = solve_custom(0, 0)
-                
-                if custom_success:
+                if solve_custom(0, 0):
                     df = pd.DataFrame(custom_timetable)
                     df.insert(0, "Day / Period", period_labels)
-                    st.success("✅ Engine Success: Timetable Generated with Rules!")
+                    st.success("✅ Timetable Generated Successfully!")
                     st.dataframe(df, use_container_width=True, hide_index=True)
                 else:
-                    st.warning("⚠️ Rules too strict. Custom Engine timed out. Falling back to Tier 2 (Google OR-Tools)...")
-                    if not ORTOOLS_AVAILABLE:
-                        st.error("❌ Fallback Failed: Google 'ortools' is not installed.")
-                    else:
-                        ortools_timetable = copy.deepcopy(initial_timetable)
-                        ortools_reqs = copy.deepcopy(class_requirements)
-                        
-                        model = cp_model.CpModel()
-                        x = {} 
-                        for c in classes_list:
-                            x[c] = {}
-                            for p in valid_periods:
-                                x[c][p] = {}
-                                for r_idx in range(len(ortools_reqs[c])):
-                                    x[c][p][r_idx] = model.NewBoolVar(f'assign_{c}_{p}_{r_idx}')
-
-                        for c in classes_list:
-                            for p in valid_periods:
-                                model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(ortools_reqs[c]))])
-
-                        for c in classes_list:
-                            for r_idx in range(len(ortools_reqs[c])):
-                                model.AddExactlyOne([x[c][p][r_idx] for p in valid_periods])
-
-                        all_teachers = set()
-                        for c in classes_list:
-                            for (t_name, sub) in ortools_reqs[c]:
-                                if t_name != "Free Period": all_teachers.add(t_name)
-
-                        for p in valid_periods:
-                            for teacher in all_teachers:
-                                teacher_assignments_in_period = []
-                                for c in classes_list:
-                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
-                                        if req[0] == teacher:
-                                            teacher_assignments_in_period.append(x[c][p][r_idx])
-                                if len(teacher_assignments_in_period) > 1:
-                                    model.AddAtMostOne(teacher_assignments_in_period)
-
-                        if rule_max_consecutive < len(valid_periods):
-                            day_wise_periods = {}
-                            for p_idx_label, label in enumerate(period_labels):
-                                if "LUNCH" not in label:
-                                    day = label.split(" - ")[0]
-                                    real_p = valid_periods[len([px for px in period_labels[:p_idx_label+1] if "LUNCH" not in px]) - 1]
-                                    if day not in day_wise_periods:
-                                        day_wise_periods[day] = []
-                                    day_wise_periods[day].append(real_p)
-                                    
-                            for teacher in all_teachers:
-                                for day, d_periods in day_wise_periods.items():
-                                    for start_idx in range(len(d_periods) - rule_max_consecutive):
-                                        window = d_periods[start_idx : start_idx + rule_max_consecutive + 1]
-                                        teacher_vars_in_window = []
-                                        for wp in window:
-                                            for c in classes_list:
-                                                for (r_idx, req) in enumerate(ortools_reqs[c]):
-                                                    if req[0] == teacher:
-                                                        teacher_vars_in_window.append(x[c][wp][r_idx])
-                                        if teacher_vars_in_window:
-                                            model.Add(sum(teacher_vars_in_window) <= rule_max_consecutive)
-
-                        solver = cp_model.CpSolver()
-                        solver.parameters.max_time_in_seconds = 30.0 
-                        status = solver.Solve(model)
-
-                        if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
-                            for c in classes_list:
-                                for p in valid_periods:
-                                    for (r_idx, req) in enumerate(ortools_reqs[c]):
-                                        if solver.Value(x[c][p][r_idx]) == 1:
-                                            p_label_idx = -1
-                                            for (idx, label) in enumerate(period_labels):
-                                                if not "LUNCH" in label:
-                                                    p_label_idx += 1
-                                                    if p_label_idx == p - 1:
-                                                        if req[0] == "Free Period":
-                                                            ortools_timetable[c][idx] = "Free Period"
-                                                        else:
-                                                            ortools_timetable[c][idx] = f"{req[1]} ({req[0]})"
-                                                        break
-                                            
-                            df = pd.DataFrame(ortools_timetable)
-                            df.insert(0, "Day / Period", period_labels)
-                            st.success(f"✅ Tier 2 Success: Timetable generated via OR-Tools! (Status: {solver.StatusName(status)})")
-                            st.dataframe(df, use_container_width=True, hide_index=True)
-                        else:
-                            st.error("❌ ABSOLUTE DEADLOCK! Engine failed.")
+                    st.error("Engine failed due to strict rules. Try modifying rules.")
