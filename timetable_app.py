@@ -75,21 +75,20 @@ def json_ai(prompt_text):
     )
     
     payload = {
-        "model": "meta/llama-3.1-70b-instruct",  # <--- BADA ENGINE LAGA DIYA (70B)
+        "model": "meta/llama-3.1-70b-instruct", 
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt_text}
         ],
-        "temperature": 0.0, # Zero temperature taaki imagination band rahe
+        "temperature": 0.0, 
         "max_tokens": 4096 
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=90)
+    
+    # 🔥 YAHAN TIMEOUT BADHAKAR 300 SECONDS (5 MINUTE) KAR DIYA HAI 🔥
+    response = requests.post(url, headers=headers, json=payload, timeout=300)
+    
     if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
-
-
-st.title("🏫 Advanced Timetable Pro (70B Engine)")
-
 # ================= STATE INITIALIZATION =================
 if "working_days" not in st.session_state: st.session_state.working_days = 6
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
