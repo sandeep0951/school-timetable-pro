@@ -172,7 +172,7 @@ with tab5:
     with col_engine:
         st.subheader("⚙️ Action Center")
         
-        # ================= AI 2: JSON SYNC =================
+# ================= AI 2: JSON SYNC =================
         if st.button("🔄 AI 2: Convert to JSON & Sync", use_container_width=True):
             if not nvidia_api_key: st.error("Key Missing!")
             else:
@@ -186,14 +186,20 @@ with tab5:
                         try:
                             raw_output = json_ai(full_text)
                             
-                            # Clean up the output (remove markdown)
-                            clean_output = raw_output.strip()
-                            if clean_output.startswith("```json"): clean_output = clean_output[7:]
-                            elif clean_output.startswith("```"): clean_output = clean_output[3:]
-                            if clean_output.endswith("```"): clean_output = clean_output[:-3]
+                            # ==========================================
+                            # SMART JSON HUNTER (Faltu text ignore karega)
+                            # ==========================================
+                            start_idx = raw_output.find('{')
+                            end_idx = raw_output.rfind('}')
                             
-                            clean_output = clean_output.strip()
+                            if start_idx != -1 and end_idx != -1:
+                                # Sirf { aur } ke beech ka data uthayega
+                                clean_output = raw_output[start_idx:end_idx+1]
+                            else:
+                                clean_output = raw_output
+                                
                             part_data = json.loads(clean_output)
+                            # ==========================================
                             
                             # Update parameters
                             if "working_days" in part_data: st.session_state.working_days = int(part_data["working_days"])
@@ -211,11 +217,12 @@ with tab5:
                             if "fixed_rules" in part_data and part_data["fixed_rules"]:
                                 st.session_state.rules_df = pd.DataFrame({"Rule": part_data["fixed_rules"]})
                                 
-                            st.success("✅ AI 2 ne JSON bana diya aur Tabs update kar diye!")
+                            st.success("✅ AI 2 ne kachra saaf karke JSON bana diya aur Tabs update kar diye!")
                             st.rerun()
+                            
                         except json.JSONDecodeError:
                             st.error("❌ AI 2 failed to build valid JSON. Raw output below:")
-                            st.code(clean_output)
+                            st.code(raw_output) 
                         except Exception as e:
                             st.error(f"❌ AI 2 Error: {e}")
 
