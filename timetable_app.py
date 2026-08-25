@@ -25,22 +25,20 @@ with st.sidebar:
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
     st.info("🛡️ Bina double quotes ke key dalein.")
 
-# ================= DUAL AI FUNCTIONS =================
-# AI 1: Chat Expert (Language Samajhne wala)
+# AI 1: Chat Expert (Language Samajhne wala - Ab Fast Model par)
 def chat_ai(messages):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
     payload = {
-        "model": "meta/llama-3.1-70b-instruct", 
+        "model": "meta/llama-3.1-8b-instruct",  # Yahan 70B ki jagah fast 8B laga diya
         "messages": messages,
         "temperature": 0.3,
         "max_tokens": 500
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=20)
+    # Time limit badhakar 40 second kar di hai
+    response = requests.post(url, headers=headers, json=payload, timeout=40)
     if response.status_code != 200: raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
-
-# AI 2: JSON Expert (Sirf Data nikalne wala)
 def json_ai(prompt_text):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
