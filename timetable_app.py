@@ -65,7 +65,7 @@ def chat_ai(messages):
         "temperature": 0.1,
         "max_tokens": 2500
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=240)
+    response = requests.post(url, headers=headers, json=payload, timeout=300)
     if response.status_code != 200:
         raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
