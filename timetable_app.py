@@ -66,7 +66,7 @@ def json_ai(prompt_text):
         '  "fixed_rules": ["Rule 1: No double booking"]\n'
         "}"
     )
-    payload = {"model": "meta/llama-3.1-70b-instruct", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt_text}], "temperature": 0.0, "max_tokens": 4096}
+    payload = {"model": "meta/llama-3.3-70b-instruct", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt_text}], "temperature": 0.0, "max_tokens": 4096}
     response = requests.post(url, headers=headers, json=payload, timeout=300)
     if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
