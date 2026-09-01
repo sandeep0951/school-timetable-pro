@@ -115,7 +115,7 @@ def chat_ai3(user_input, current_data_str, history):
         "temperature": 0.2,
         "max_tokens": 4096
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=300)
+    response = requests.post(url, headers=headers, json=payload, timeout=600)
     if response.status_code != 200:
         raise Exception(f"AI 3 Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
