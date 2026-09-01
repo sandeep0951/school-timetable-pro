@@ -63,7 +63,7 @@ def chat_ai(messages):
         "model": "deepseek-ai/deepseek-v4-pro-0813",
         "messages": safe_messages,
         "temperature": 0.1,
-        "max_tokens": 1500
+        "max_tokens": 2500
     }
     response = requests.post(url, headers=headers, json=payload, timeout=240)
     if response.status_code != 200:
