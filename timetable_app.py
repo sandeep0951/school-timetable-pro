@@ -26,9 +26,9 @@ with st.sidebar:
     st.header("🔑 API Keys Setup")
     st.markdown(
         "Triple AI Architecture:\n"
-        "1. Data Setup: DeepSeek 0731\n"
-        "2. JSON Sync: DeepSeek 0731\n"
-        "3. Rule Fixer: DeepSeek 0731"
+        "1. Data Setup: DeepSeek V4\n"
+        "2. JSON Sync: DeepSeek V4\n"
+        "3. Rule Fixer: DeepSeek V4"
     )
     nvidia_api_key = st.text_input(
         label="Nvidia Master Key (nvapi-...)",
@@ -42,7 +42,7 @@ with st.sidebar:
 
 # ================= TRIPLE AI FUNCTIONS =================
 
-# AI 1: Chat Collector (DeepSeek 0731)
+# AI 1: Chat Collector (DeepSeek V4 Pro)
 def chat_ai(messages):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     key = nvidia_api_key.strip() if nvidia_api_key else ""
@@ -60,17 +60,17 @@ def chat_ai(messages):
     }
     safe_messages = [system_instruction] + [m for m in messages if m.get("role") != "system"]
     payload = {
-        "model": "deepseek-ai/deepseek-v4-flash-0731",
+        "model": "deepseek-ai/deepseek-v4-pro-0813",
         "messages": safe_messages,
         "temperature": 0.1,
-        "max_tokens": 200
+        "max_tokens": 100
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=240)
+    response = requests.post(url, headers=headers, json=payload, timeout=90)
     if response.status_code != 200:
         raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
-# AI 2: JSON Expert (DeepSeek 0731)
+# AI 2: JSON Expert (DeepSeek V4 Pro)
 def json_ai(prompt_text):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     key = nvidia_api_key.strip() if nvidia_api_key else ""
@@ -96,7 +96,7 @@ def json_ai(prompt_text):
         "}"
     )
     payload = {
-        "model": "deepseek-ai/deepseek-v4-flash-0731",
+        "model": "deepseek-ai/deepseek-v4-pro-0813",
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": prompt_text}
@@ -109,7 +109,7 @@ def json_ai(prompt_text):
         raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
-# AI 3: Interactive Diagnostics & Rule Fixer (DeepSeek 0731)
+# AI 3: Interactive Diagnostics & Rule Fixer (DeepSeek V4 Pro)
 def chat_ai3(user_input, current_data_str, history):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     key = nvidia_api_key.strip() if nvidia_api_key else ""
@@ -141,12 +141,12 @@ def chat_ai3(user_input, current_data_str, history):
     messages = [{"role": "system", "content": system_prompt}] + history
     messages.append({"role": "user", "content": user_input})
     payload = {
-        "model": "deepseek-ai/deepseek-v4-flash-0731",
+        "model": "deepseek-ai/deepseek-v4-pro-0813",
         "messages": messages,
         "temperature": 0.2,
         "max_tokens": 1500
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=120)
+    response = requests.post(url, headers=headers, json=payload, timeout=180)
     if response.status_code != 200:
         raise Exception(f"AI 3 Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
