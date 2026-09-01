@@ -40,7 +40,7 @@ def chat_ai(messages):
         "content": "You are a receptionist. Acknowledge data and say: '✅ Data is ready. Please click the Sync Button to update tabs.' DO NOT generate timetable."
     }
     safe_messages = [system_instruction] + [m for m in messages if m["role"] != "system"]
-    payload = {"model": "meta/llama-3.1-8b-instruct", "messages": safe_messages, "temperature": 0.1, "max_tokens": 100}
+    payload = {"model": "meta/llama-3.3-70-instruct", "messages": safe_messages, "temperature": 0.1, "max_tokens": 100}
     response = requests.post(url, headers=headers, json=payload, timeout=30)
     if response.status_code != 200: raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
