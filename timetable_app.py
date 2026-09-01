@@ -40,7 +40,7 @@ def chat_ai(messages):
         "content": "You are a receptionist. Acknowledge data and say: '✅ Data is ready. Please click the Sync Button to update tabs.' DO NOT generate timetable."
     }
     safe_messages = [system_instruction] + [m for m in messages if m["role"] != "system"]
-    payload = {"model": "meta/llama-3.3-70b-instruct", "messages": safe_messages, "temperature": 0.1, "max_tokens": 100}
+    payload = {"model": "meta/llama-3.1-405b-instruct", "messages": safe_messages, "temperature": 0.1, "max_tokens": 100}
     response = requests.post(url, headers=headers, json=payload, timeout=30)
     if response.status_code != 200: raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
@@ -66,7 +66,7 @@ def json_ai(prompt_text):
         '  "fixed_rules": ["Rule 1: No double booking"]\n'
         "}"
     )
-    payload = {"model": "meta/llama-3.3-70b-instruct", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt_text}], "temperature": 0.0, "max_tokens": 4096}
+    payload = {"model": "meta/llama-3.1-405b-instruct", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt_text}], "temperature": 0.0, "max_tokens": 4096}
     response = requests.post(url, headers=headers, json=payload, timeout=300)
     if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
@@ -99,7 +99,7 @@ def chat_ai3(user_input, current_data_str, history):
     messages = [{"role": "system", "content": system_prompt}] + history
     messages.append({"role": "user", "content": user_input})
     
-    payload = {"model": "meta/llama-3.1-70b-instruct", "messages": messages, "temperature": 0.2, "max_tokens": 1500}
+    payload = {"model": "meta/llama-3.1-405b-instruct", "messages": messages, "temperature": 0.2, "max_tokens": 1500}
     response = requests.post(url, headers=headers, json=payload, timeout=120)
     if response.status_code != 200: raise Exception(f"AI 3 Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
