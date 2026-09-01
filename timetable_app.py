@@ -3,84 +3,148 @@ import pandas as pd
 import json, re, random, sys, requests
 from ortools.sat.python import cp_model
 
-st.set_page_config(page_title="Advanced Timetable Pro", layout="wide")
+st.set_page_config(page_title="Advanced Timetable Pro (Triple AI System)", layout="wide")
 
-# --- SIDEBAR ---
+# ================= SIDEBAR =================
 with st.sidebar:
     st.header("🔑 API Keys Setup")
-    st.markdown("Triple AI System (DeepSeek V4)")
+    st.markdown("Triple AI Architecture:\n1. Chat Collector: DeepSeek V4\n2. JSON Sync: DeepSeek V4\n3. Rule Fixer: DeepSeek V4")
     nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
+    st.info("🛡️ Bina quotes ke API key dalein.")
 
-# --- AI HELPER ---
+# ================= AI HELPER =================
 def call_nvidia(messages, temp=0.1, max_tokens=4000):
     url = "https://integrate.api.nvidia.com/v1/chat/completions"
     key = nvidia_api_key.strip() if nvidia_api_key else ""
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    payload = {"model": "deepseek-ai/deepseek-v4-pro-0813", "messages": messages, "temperature": temp, "max_tokens": max_tokens}
+    payload = {
+        "model": "deepseek-ai/deepseek-v4-pro-0813",
+        "messages": messages,
+        "temperature": temp,
+        "max_tokens": max_tokens
+    }
     res = requests.post(url, headers=headers, json=payload, timeout=320)
-    if res.status_code != 200: raise Exception(f"API Error: {res.text}")
+    if res.status_code != 200:
+        raise Exception(f"Nvidia API Error: {res.text}")
     return res.json()["choices"][0]["message"]["content"]
 
-# --- RANGE PARSER ---
-def parse_allowed(allowed_str, all_classes):
-    s = str(allowed_str).strip()
-    if not s or s.lower() == "all": return list(all_classes)
-    m = re.search(r'(\d+)\s*[-_]?\s*([A-Za-z])\s*(?:to|-)\s*(\d+)\s*[-_]?\s*([A-Za-z])', s, re.I)
+# ================= ROBUST JSON PARSER =================
+def extract_json_safe(raw_text):
+    if not raw_text:
+        return None
+    m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', raw_text, re.DOTALL | re.IGNORECASE)
     if m:
-        sg, eg = int(m.group(1)), int(m.group(3))
-        return [c for c in all_classes if re.match(r'(\d+)', c) and sg <= int(re.match(r'(\d+)', c).group(1)) <= eg]
-    return [c for c in all_classes if c.lower() in [x.strip().lower() for x in s.split(",")]]
+        try:
+            return json.loads(m.group(1))
+        except:
+            pass
+    s_idx = raw_text.find("{")
+    e_idx = raw_text.rfind("}")
+    if s_idx != -1 and e_idx != -1 and e_idx > s_idx:
+        raw = raw_text[s_idx:e_idx+1]
+        raw = re.sub(r',\s*}', '}', raw)
+        raw = re.sub(r',\s*]', ']', raw)
+        try:
+            return json.loads(raw)
+        except Exception:
+            pass
+    return None
 
-# --- DATA PREP ---
-def prepare_data():
-    c_list = st.session_state.classes_df["Class Name"].dropna().tolist()
-    t_list = st.session_state.teachers_df.to_dict("records")
+# ================= RANGE PARSER =================
+def parse_allowed_classes(allowed_str, all_classes):
+    s = str(allowed_str).strip()
+    if not s or s.lower() == "all":
+        return list(all_classes)
+    range_match = re.search(r'(\d+)\s*[-_]?\s*([A-Za-z])\s*(?:to|-)\s*(\d+)\s*[-_]?\s*([A-Za-z])', s, re.IGNORECASE)
+    if range_match:
+        sg = int(range_match.group(1))
+        eg = int(range_match.group(3))
+        matched = [c for c in all_classes if re.match(r'(\d+)', c) and sg <= int(re.match(r'(\d+)', c).group(1)) <= eg]
+        if matched:
+            return matched
+    tokens = [x.strip().lower() for x in s.split(",")]
+    return [c for c in all_classes if c.lower() in tokens]
+
+# ================= DATA PREPARATION =================
+def prepare_engine_data():
+    sys.setrecursionlimit(5000)
+    classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
+    teachers_list = st.session_state.teachers_df.to_dict("records")
     w_days = int(st.session_state.working_days)
     p_per_day = int(st.session_state.periods_per_day)
     break_at = int(st.session_state.break_at)
     is_half = st.session_state.saturday_half_day
 
-    days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][:w_days]
-    p_labels, v_periods, g_idx = [], [], 0
-    for d in days:
-        cur_p = 4 if (d.lower() == "saturday" and is_half) else p_per_day
-        for p in range(1, cur_p + 1):
-            g_idx += 1
-            p_labels.append(f"{d} - P{p}")
-            v_periods.append(g_idx)
+    days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][:w_days]
+    period_labels = []
+    valid_periods = []
+    global_p_idx = 0
+
+    for d in days_str:
+        current_day_periods = 4 if (d.lower() == "saturday" and is_half) else p_per_day
+        for p in range(1, current_day_periods + 1):
+            global_p_idx += 1
+            period_labels.append(f"{d} - P{p}")
+            valid_periods.append(global_p_idx)
             if p == break_at and not (d.lower() == "saturday" and is_half):
-                p_labels.append(f"{d} - LUNCH")
+                period_labels.append(f"{d} - LUNCH")
 
-    # Workload balance per subject
-    sub_map = {}
-    for t in t_list:
+    total_weekly_periods = len(valid_periods)
+    initial_timetable = {c: ["EMPTY"] * len(period_labels) for c in classes_list}
+    for c in classes_list:
+        for idx, label in enumerate(period_labels):
+            if "LUNCH" in label:
+                initial_timetable[c][idx] = "LUNCH / BREAK"
+
+    # Group teachers by subject to balance workload and prevent deadlocks
+    subjects_map = {}
+    for t in teachers_list:
         sub = str(t.get("Subject", "")).strip()
-        if not sub: continue
-        p_cnt = int(t.get("Periods/Week (Per Class)", 4))
-        if sub not in sub_map: sub_map[sub] = {"periods": p_cnt, "teachers": []}
-        sub_map[sub]["teachers"].append({"name": t.get("Teacher Name", ""), "allowed": parse_allowed(t.get("Allowed Classes", ""), c_list), "load": 0})
+        if not sub:
+            continue
+        try:
+            p_count = int(t.get("Periods/Week (Per Class)", 4))
+        except Exception:
+            p_count = 4
+        if sub not in subjects_map:
+            subjects_map[sub] = {"periods": p_count, "teachers": []}
+        subjects_map[sub]["teachers"].append({
+            "name": t.get("Teacher Name", ""),
+            "allowed": parse_allowed_classes(t.get("Allowed Classes", ""), classes_list),
+            "load": 0
+        })
 
-    reqs = {c: [] for c in c_list}
-    for sub, info in sub_map.items():
-        for c in c_list:
-            eligible = [t for t in info["teachers"] if c in t["allowed"]]
-            if eligible:
-                eligible.sort(key=lambda x: x["load"])
-                chosen = eligible[0]
-                chosen["load"] += info["periods"]
-                for _ in range(info["periods"]): reqs[c].append((chosen["name"], sub))
+    class_requirements = {c: [] for c in classes_list}
+    for sub, info in subjects_map.items():
+        p_count = info["periods"]
+        teachers = info["teachers"]
+        for c in classes_list:
+            eligible = [t for t in teachers if c in t["allowed"]]
+            if not eligible:
+                continue
+            eligible.sort(key=lambda x: x["load"])
+            chosen = eligible[0]
+            chosen["load"] += p_count
+            for _ in range(p_count):
+                class_requirements[c].append((chosen["name"], sub))
 
-    for c in c_list:
-        while len(reqs[c]) < len(v_periods): reqs[c].append(("-", "Free Period"))
-        if len(reqs[c]) > len(v_periods): reqs[c] = reqs[c][:len(v_periods)]
+    for c in classes_list:
+        while len(class_requirements[c]) < total_weekly_periods:
+            class_requirements[c].append(("-", "Free Period"))
+        if len(class_requirements[c]) > total_weekly_periods:
+            class_requirements[c] = class_requirements[c][:total_weekly_periods]
 
-    return c_list, p_labels, v_periods, reqs
+    return classes_list, period_labels, valid_periods, initial_timetable, class_requirements
 
-# --- STATE INIT ---
+# ================= STATE INITIALIZATION =================
 if "working_days" not in st.session_state: st.session_state.working_days = 6
 if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 7
 if "break_at" not in st.session_state: st.session_state.break_at = 4
 if "saturday_half_day" not in st.session_state: st.session_state.saturday_half_day = False
+if "periods_timing_df" not in st.session_state:
+    slots = [{"Slot": f"Period {i}", "Duration (Mins)": 45} for i in range(1, 8)]
+    slots.insert(4, {"Slot": "LUNCH BREAK", "Duration (Mins)": 30})
+    st.session_state.periods_timing_df = pd.DataFrame(slots)
 if "classes_df" not in st.session_state: st.session_state.classes_df = pd.DataFrame({"Class Name": ["1-A", "1-B"]})
 if "teachers_df" not in st.session_state:
     st.session_state.teachers_df = pd.DataFrame([
@@ -88,78 +152,128 @@ if "teachers_df" not in st.session_state:
         {"Teacher Name": "Rahul Jain", "Subject": "Mathematics", "Allowed Classes": "1-A to 5-B", "Periods/Week (Per Class)": 5}
     ])
 if "rules_df" not in st.session_state: st.session_state.rules_df = pd.DataFrame({"Rule": []})
-if "ai3_msgs" not in st.session_state: st.session_state.ai3_msgs = []
+if "chat_messages" not in st.session_state: st.session_state.chat_messages = []
 
 st.title("🏫 Advanced Timetable Pro (Triple AI System)")
 
-# --- TABS ---
-t1, t2, t3, t4, t5 = st.tabs(["🕒 Timings", "🏫 Classes", "👨🏫 Teachers", "⚙️ Rules", "🚀 Engine & AI"])
+# ================= UI TABS =================
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕒 Timings", "🏫 Classes", "👨🏫 Teachers", "⚙️ Rules", "🚀💬 AI & Engine Center"])
 
-with t1:
-    c1, c2 = st.columns(2)
-    with c1:
-        st.session_state.working_days = st.number_input("Working Days", 1, 7, int(st.session_state.working_days))
-        st.session_state.periods_per_day = st.number_input("Periods per Day", 1, 20, int(st.session_state.periods_per_day))
-        st.session_state.break_at = st.number_input("Lunch After Period", 1, 15, int(st.session_state.break_at))
-        st.session_state.saturday_half_day = st.checkbox("Saturday Half-Day?", value=st.session_state.saturday_half_day)
-    with c2:
-        slots = [{"Slot": f"P{i}", "Time": "45 Mins"} for i in range(1, int(st.session_state.periods_per_day)+1)]
-        st.dataframe(pd.DataFrame(slots), use_container_width=True, hide_index=True)
+with tab1:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.session_state.working_days = st.number_input("1. Working Days", 1, 7, int(st.session_state.working_days))
+        st.session_state.periods_per_day = st.number_input("2. Periods per Day", 1, 20, int(st.session_state.periods_per_day))
+        st.session_state.break_at = st.number_input("Lunch Break AFTER period?", 1, 15, int(st.session_state.break_at))
+        st.session_state.saturday_half_day = st.checkbox("4. Saturday Half-Day?", value=st.session_state.saturday_half_day)
+    with col2:
+        st.session_state.periods_timing_df = st.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
 
-with t2: st.session_state.classes_df = st.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
-with t3: st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
-with t4: st.session_state.rules_df = st.data_editor(st.session_state.rules_df, num_rows="dynamic", use_container_width=True)
+with tab2:
+    st.session_state.classes_df = st.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
 
-with t5:
-    col_l, col_r = st.columns([4, 6])
-    with col_l:
-        st.subheader("💬 AI Data Chat")
-        user_input = st.text_area("Paste text/data here:", height=100)
-        if st.button("Send to AI 1 🚀"):
-            if not nvidia_api_key: st.error("Enter Nvidia API Key in sidebar!")
+with tab3:
+    st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
+
+with tab4:
+    st.session_state.rules_df = st.data_editor(st.session_state.rules_df, num_rows="dynamic", use_container_width=True)
+
+with tab5:
+    st.markdown("### 🛠️ Step 1 & 2: Setup Data & Run Engine")
+    col_chat, col_engine = st.columns([4, 6], gap="large")
+
+    with col_chat:
+        st.subheader("💬 AI-1 Data Collector")
+        chat_box = st.container(height=250)
+        with chat_box:
+            for m in st.session_state.chat_messages:
+                with st.chat_message(m["role"]):
+                    st.markdown(m["content"])
+
+        with st.form("chat_form", clear_on_submit=True):
+            user_text = st.text_area("Paste Data Here:", height=80)
+            btn_c1, btn_c2 = st.columns([7, 3])
+            with btn_c1: submit_msg = st.form_submit_button("Send Data 🚀")
+            with btn_c2:
+                if st.form_submit_button("🗑️ Clear"):
+                    st.session_state.chat_messages = []
+                    st.rerun()
+
+        if submit_msg and user_text:
+            if not nvidia_api_key:
+                st.error("❌ Key Missing in Sidebar!")
             else:
+                st.session_state.chat_messages.append({"role": "user", "content": user_text})
+                with chat_box:
+                    with st.chat_message("user"): st.markdown(user_text)
                 with st.spinner("AI 1 Acknowledging..."):
                     try:
-                        reply = call_nvidia([{"role": "system", "content": "Acknowledge receipt and say: '✅ Data ready! Click Sync Tabs to update.'"}, {"role": "user", "content": user_input}], max_tokens=100)
-                        st.info(reply)
-                    except Exception as e: st.error(str(e))
+                        sys_prompt = "You are a receptionist. Acknowledge receipt and say: '✅ Data is ready! Please click the Sync Button to update tabs.' DO NOT generate timetable."
+                        reply = call_nvidia([{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_text}], max_tokens=2500)
+                        st.session_state.chat_messages.append({"role": "assistant", "content": reply})
+                        with chat_box:
+                            with st.chat_message("assistant"): st.markdown(reply)
+                    except Exception as e:
+                        st.error(f"AI 1 Error: {e}")
 
-        if st.button("🔄 AI 2: Extract & Sync Tabs"):
-            if not nvidia_api_key: st.error("Enter Nvidia API Key in sidebar!")
+    with col_engine:
+        st.subheader("🔄 AI-2 & Engine Runner")
+        if st.button("🔄 AI 2: Extract & Sync Tabs", use_container_width=True):
+            if not nvidia_api_key:
+                st.error("❌ Key Missing in Sidebar!")
             else:
-                with st.spinner("AI 2 extracting JSON data..."):
-                    try:
-                        sys_prompt = "Extract parameters into raw JSON: {\"working_days\": 6, \"periods_per_day\": 7, \"break_at\": 4, \"classes\": [\"1-A\"], \"teachers\": [{\"Teacher Name\": \"T1\", \"Subject\": \"S1\", \"Allowed Classes\": \"1-A to 5-B\", \"Periods/Week (Per Class)\": 4}], \"rules\": []}"
-                        raw = call_nvidia([{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_input}])
-                        raw = raw[raw.find("{"):raw.rfind("}")+1]
-                        raw = re.sub(r',\s*}', '}', re.sub(r',\s*]', ']', raw))
-                        data = json.loads(raw)
-                        if "classes" in data: st.session_state.classes_df = pd.DataFrame({"Class Name": data["classes"]})
-                        if "teachers" in data: st.session_state.teachers_df = pd.DataFrame(data["teachers"])
-                        if "working_days" in data: st.session_state.working_days = int(data["working_days"])
-                        if "periods_per_day" in data: st.session_state.periods_per_day = int(data["periods_per_day"])
-                        if "break_at" in data: st.session_state.break_at = int(data["break_at"])
-                        if "rules" in data: st.session_state.rules_df = pd.DataFrame({"Rule": data["rules"]})
-                        st.success("🎉 Tabs Synced Successfully!")
-                        st.rerun()
-                    except Exception as e: st.error(f"Sync Error: {e}")
+                all_msgs = [m["content"] for m in st.session_state.chat_messages if m["role"] == "user"]
+                full_input = "\n\n".join(all_msgs)
+                if len(full_input.strip()) < 10:
+                    st.warning("⚠️ Pehle chat box mein apna school data paste karke 'Send Data' dabayein!")
+                else:
+                    with st.spinner("AI 2 JSON bana raha hai (1 se 2 minute lag sakte hain)..."):
+                        try:
+                            sys_p = (
+                                "You are a strict JSON data extractor. Extract timetable parameters from the text and output ONLY RAW JSON.\n"
+                                "{\n"
+                                '  "working_days": 6,\n'
+                                '  "periods_per_day": 7,\n'
+                                '  "break_at": 4,\n'
+                                '  "saturday_half_day": false,\n'
+                                '  "classes": ["1-A", "1-B"],\n'
+                                '  "teachers": [{"Teacher Name": "Amit Sharma", "Subject": "English", "Allowed Classes": "1-A to 5-B", "Periods/Week (Per Class)": 4}],\n'
+                                '  "fixed_rules": ["Rule 1"]\n'
+                                "}"
+                            )
+                            raw_out = call_nvidia([{"role": "system", "content": sys_p}, {"role": "user", "content": full_input}], temp=0.0, max_tokens=4096)
+                            data = extract_json_safe(raw_out)
+                            if data:
+                                if "working_days" in data: st.session_state.working_days = int(data["working_days"])
+                                if "periods_per_day" in data: st.session_state.periods_per_day = int(data["periods_per_day"])
+                                if "break_at" in data: st.session_state.break_at = int(data["break_at"])
+                                if "saturday_half_day" in data: st.session_state.saturday_half_day = str(data["saturday_half_day"]).lower() == "true"
+                                if "classes" in data and data["classes"]: st.session_state.classes_df = pd.DataFrame({"Class Name": data["classes"]})
+                                if "teachers" in data and data["teachers"]: st.session_state.teachers_df = pd.DataFrame(data["teachers"])
+                                if "fixed_rules" in data and data["fixed_rules"]: st.session_state.rules_df = pd.DataFrame({"Rule": data["fixed_rules"]})
+                                st.success("🎉 BINGO! Tabs Successfully Update Ho Gaye!")
+                                time_module.sleep(2)
+                                st.rerun()
+                            else:
+                                st.error("❌ AI 2 output parse nahi ho paya. Kripya dobara Sync dabayein.")
+                        except Exception as e:
+                            st.error(f"Sync Error: {e}")
 
-    with col_r:
-        st.subheader("🔥 Timetable Generation Engine")
-        if st.button("⚡ Generate Conflict-Free Timetable (OR-Tools)", type="primary", use_container_width=True):
-            with st.spinner("Generating conflict-free timetable..."):
+        st.markdown("<br>", unsafe_allow_html=True)
+        if st.button("🔥 Run Google OR-Tools (Conflict-Free Solver)", type="primary", use_container_width=True):
+            with st.spinner("Generating optimal timetable..."):
                 try:
-                    c_list, p_labels, v_periods, reqs = prepare_data()
+                    c_list, p_labels, v_periods, ortools_tt, reqs = prepare_engine_data()
                     model = cp_model.CpModel()
                     x = {c: {p: {r_idx: model.NewBoolVar(f"a_{c}_{p}_{r_idx}") for r_idx in range(len(reqs[c]))} for p in v_periods} for c in c_list}
                     for c in c_list:
                         for p in v_periods: model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(reqs[c]))])
                         for r_idx in range(len(reqs[c])): model.AddExactlyOne([x[c][p][r_idx] for p in v_periods])
 
-                    all_t = {req[0] for c in c_list for req in reqs[c] if req[0] != "-"}
+                    all_teachers = {req[0] for c in c_list for req in reqs[c] if req[0] != "-"}
                     for p in v_periods:
-                        for t_name in all_t:
-                            t_assigns = [x[c][p][r_idx] for c in c_list for r_idx, req in enumerate(reqs[c]) if req[0] == t_name]
+                        for teacher in all_teachers:
+                            t_assigns = [x[c][p][r_idx] for c in c_list for r_idx, req in enumerate(reqs[c]) if req[0] == teacher]
                             if len(t_assigns) > 1: model.AddAtMostOne(t_assigns)
 
                     solver = cp_model.CpSolver()
@@ -167,47 +281,61 @@ with t5:
                     status = solver.Solve(model)
 
                     if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-                        grid = {c: ["EMPTY"] * len(p_labels) for c in c_list}
                         for c in c_list:
-                            for idx, lbl in enumerate(p_labels):
-                                if "LUNCH" in lbl: grid[c][idx] = "LUNCH / BREAK"
                             for p in v_periods:
                                 for r_idx, req in enumerate(reqs[c]):
                                     if solver.Value(x[c][p][r_idx]) == 1:
-                                        p_idx = -1
-                                        for idx, lbl in enumerate(p_labels):
-                                            if "LUNCH" not in lbl:
-                                                p_idx += 1
-                                                if p_idx == p - 1:
-                                                    grid[c][idx] = "Free Period" if req[0] == "-" else f"{req[1]} ({req[0]})"
+                                        p_label_idx = -1
+                                        for idx, label in enumerate(p_labels):
+                                            if "LUNCH" not in label:
+                                                p_label_idx += 1
+                                                if p_label_idx == p - 1:
+                                                    ortools_tt[c][idx] = "Free Period" if req[0] == "-" else f"{req[1]} ({req[0]})"
                                                     break
-                        df_res = pd.DataFrame(grid)
+                        df_res = pd.DataFrame(ortools_tt)
                         df_res.insert(0, "Day / Period", p_labels)
-                        st.success(f"✅ Timetable Generated Successfully! (Status: {solver.StatusName(status)})")
+                        st.success(f"🔥 OR-Tools Success! (Status: {solver.StatusName(status)})")
                         st.dataframe(df_res, use_container_width=True, hide_index=True)
                     else:
-                        st.error("❌ Deadlock detected. Use AI-3 Diagnostic below to troubleshoot.")
+                        st.error("❌ Deadlock detected. Neeche AI-3 se analyze karwayein.")
                 except Exception as e:
                     st.error(f"Engine Error: {e}")
 
     st.markdown("---")
     st.subheader("🤖 Step 3: AI-3 Deadlock Diagnostics & Rule Fixer")
-    ai3_txt = st.text_area("Ask AI-3 to troubleshoot / modify rules:")
-    if st.button("Ask AI-3 🛠️"):
-        if not nvidia_api_key: st.error("Enter Nvidia API Key!")
+    ai3_input = st.text_area("AI-3 se baat karein ya 'Auto-Analyze' dabayein:", height=80)
+    col_a1, col_a2 = st.columns([7, 3])
+    with col_a1: submit_ai3 = st.button("Ask AI-3 & Update Rules 🛠️", use_container_width=True)
+    with col_a2: auto_btn = st.button("🚨 Auto-Analyze", use_container_width=True)
+
+    target_prompt = None
+    if auto_btn:
+        target_prompt = "Google OR-Tools fail ho raha hai. Mere live data aur rules ko check karke galti batao."
+    elif submit_ai3 and ai3_input:
+        target_prompt = ai3_input
+
+    if target_prompt:
+        if not nvidia_api_key:
+            st.error("❌ Key Missing in Sidebar!")
         else:
             with st.spinner("AI-3 Analyzing..."):
                 try:
-                    c_list, p_labels, v_periods, reqs = prepare_data()
-                    live_str = json.dumps({"classes": c_list, "teachers": st.session_state.teachers_df.to_dict("records"), "rules": st.session_state.rules_df["Rule"].tolist()})
-                    sys_p = f"You are AI-3 Timetable Diagnostics. DATA:\n{live_str}\nHelp user troubleshoot. If updating rules, end with: ```json\n{{\"updated_rules\": [\"Rule 1\"]}}\n```"
-                    reply = call_nvidia([{"role": "system", "content": sys_p}, {"role": "user", "content": ai3_txt}])
+                    c_list, p_labels, v_periods, _, _ = prepare_engine_data()
+                    live_info = json.dumps({
+                        "classes": c_list,
+                        "teachers": st.session_state.teachers_df.to_dict("records"),
+                        "rules": st.session_state.rules_df["Rule"].tolist()
+                    })
+                    sys_p = f"You are AI-3 Timetable Diagnostics. DATA:\n{live_info}\nHelp user troubleshoot. If updating rules, output JSON at the end: ```json\n{{\"updated_rules\": [\"Rule 1\"]}}\n```"
+                    reply = call_nvidia([{"role": "system", "content": sys_p}, {"role": "user", "content": target_prompt}], temp=0.2, max_tokens=2500)
                     st.markdown(re.sub(r'```json\s*\{.*?\}\s*```', '', reply, flags=re.DOTALL))
                     m = re.search(r'```json\s*(\{.*?\})\s*```', reply, re.DOTALL)
                     if m:
                         r_data = json.loads(m.group(1))
                         if "updated_rules" in r_data:
                             st.session_state.rules_df = pd.DataFrame({"Rule": r_data["updated_rules"]})
-                            st.success("✅ Rules updated by AI-3!")
+                            st.success("✅ AI-3 ne Rules Tab update kar diya hai!")
+                            time_module.sleep(2)
                             st.rerun()
-                except Exception as e: st.error(f"AI-3 Error: {e}")
+                except Exception as e:
+                    st.error(f"AI 3 Error: {e}")
