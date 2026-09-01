@@ -33,22 +33,34 @@ with st.sidebar:
 
 # AI 1: Chat Collector (DeepSeek 0731)
 def chat_ai(messages):
-    url = "[https://integrate.api.nvidia.com/v1/chat/completions](https://integrate.api.nvidia.com/v1/chat/completions)"
-    headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
+    url = "https://integrate.api.nvidia.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {nvidia_api_key}",
+        "Content-Type": "application/json"
+    }
     system_instruction = {
-        "role": "system", 
+        "role": "system",
         "content": "You are a receptionist. Acknowledge data and say: '✅ Data is ready. Please click the Sync Button to update tabs.' DO NOT generate timetable."
     }
     safe_messages = [system_instruction] + [m for m in messages if m["role"] != "system"]
-    payload = {"model": "deepseek-ai/deepseek-v4-flash-0731", "messages": safe_messages, "temperature": 0.1, "max_tokens": 100}
+    payload = {
+        "model": "deepseek-ai/deepseek-v4-flash-0731",
+        "messages": safe_messages,
+        "temperature": 0.1,
+        "max_tokens": 100
+    }
     response = requests.post(url, headers=headers, json=payload, timeout=30)
-    if response.status_code != 200: raise Exception(f"Chat AI Error: {response.text}")
+    if response.status_code != 200:
+        raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
 # AI 2: JSON Expert (DeepSeek 0731)
 def json_ai(prompt_text):
-    url = "[https://integrate.api.nvidia.com/v1/chat/completions](https://integrate.api.nvidia.com/v1/chat/completions)"
-    headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
+    url = "https://integrate.api.nvidia.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {nvidia_api_key}",
+        "Content-Type": "application/json"
+    }
     system_prompt = (
         "You are a strict JSON data extractor. Extract timetable parameters from the text and output ONLY RAW JSON. "
         "CRITICAL RULES: \n"
@@ -66,16 +78,27 @@ def json_ai(prompt_text):
         '  "fixed_rules": ["Rule 1: No double booking"]\n'
         "}"
     )
-    payload = {"model": "deepseek-ai/deepseek-v4-flash-0731", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": prompt_text}], "temperature": 0.0, "max_tokens": 4096}
+    payload = {
+        "model": "deepseek-ai/deepseek-v4-flash-0731",
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt_text}
+        ],
+        "temperature": 0.0,
+        "max_tokens": 4096
+    }
     response = requests.post(url, headers=headers, json=payload, timeout=300)
-    if response.status_code != 200: raise Exception(f"JSON AI Error: {response.text}")
+    if response.status_code != 200:
+        raise Exception(f"JSON AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
 # AI 3: Interactive Diagnostics & Rule Fixer (DeepSeek 0731)
 def chat_ai3(user_input, current_data_str, history):
-    url = "[https://integrate.api.nvidia.com/v1/chat/completions](https://integrate.api.nvidia.com/v1/chat/completions)"
-    headers = {"Authorization": f"Bearer {nvidia_api_key}", "Content-Type": "application/json"}
-    
+    url = "https://integrate.api.nvidia.com/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {nvidia_api_key}",
+        "Content-Type": "application/json"
+    }
     system_prompt = (
         "You are 'AI-3', an expert Timetable Diagnostics and Rule Fixer AI.\n"
         "You help the user troubleshoot why their Timetable Engine (OR-Tools) is failing (Deadlock). You communicate in friendly Hinglish (Hindi + English).\n\n"
@@ -92,13 +115,17 @@ def chat_ai3(user_input, current_data_str, history):
         "```\n"
         "(Only output the JSON block if a rule needs to be updated. Otherwise, just reply with text analysis)."
     )
-    
     messages = [{"role": "system", "content": system_prompt}] + history
     messages.append({"role": "user", "content": user_input})
-    
-    payload = {"model": "deepseek-ai/deepseek-v4-flash-0731", "messages": messages, "temperature": 0.2, "max_tokens": 1500}
+    payload = {
+        "model": "deepseek-ai/deepseek-v4-flash-0731",
+        "messages": messages,
+        "temperature": 0.2,
+        "max_tokens": 1500
+    }
     response = requests.post(url, headers=headers, json=payload, timeout=120)
-    if response.status_code != 200: raise Exception(f"AI 3 Error: {response.text}")
+    if response.status_code != 200:
+        raise Exception(f"AI 3 Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
 
 
@@ -118,7 +145,8 @@ def prepare_engine_data():
         r_lower = r.lower()
         if "consecutive" in r_lower or "continuous" in r_lower:
             nums = re.findall(r'\d+', r_lower)
-            if nums: rule_max_consecutive = int(nums[0])
+            if nums:
+                rule_max_consecutive = int(nums[0])
             
     days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     period_labels, valid_periods, global_p_idx = [], [], 0
@@ -137,26 +165,35 @@ def prepare_engine_data():
     initial_timetable = {c: ["EMPTY"] * len(period_labels) for c in classes_list} 
     for c in classes_list:
         for idx, label in enumerate(period_labels):
-            if "LUNCH" in label: initial_timetable[c][idx] = "LUNCH / BREAK"
+            if "LUNCH" in label:
+                initial_timetable[c][idx] = "LUNCH / BREAK"
                 
     initial_busy_teachers = {i: set() for i in range(len(period_labels))}
     class_requirements = {c: [] for c in classes_list}
     
     for t in teachers_list:
-        t_name, t_sub_raw, t_allowed_str = t.get("Teacher Name", ""), str(t.get("Subject", "")), str(t.get("Allowed Classes", "")).strip()
-        try: p_per_class = int(t.get("Periods/Week (Per Class)", working_days))
-        except: p_per_class = working_days
-        if p_per_class > total_weekly_periods: p_per_class = total_weekly_periods
+        t_name = t.get("Teacher Name", "")
+        t_sub_raw = str(t.get("Subject", ""))
+        t_allowed_str = str(t.get("Allowed Classes", "")).strip()
+        try:
+            p_per_class = int(t.get("Periods/Week (Per Class)", working_days))
+        except:
+            p_per_class = working_days
+        if p_per_class > total_weekly_periods:
+            p_per_class = total_weekly_periods
 
         actual_classes = classes_list if str(t_allowed_str).lower() == "all" or str(t_allowed_str) == "" else [c for c in classes_list if c.lower() in [x.strip().lower() for x in str(t_allowed_str).split(",")]]
         for c in actual_classes:
             for sub in [s.strip() for s in t_sub_raw.split(",")]:
-                for _ in range(p_per_class): class_requirements[c].append((t_name, sub))
+                for _ in range(p_per_class):
+                    class_requirements[c].append((t_name, sub))
 
     for c in classes_list:
         if len(class_requirements[c]) > total_weekly_periods:
-            random.shuffle(class_requirements[c]); class_requirements[c] = class_requirements[c][:total_weekly_periods]
-        while len(class_requirements[c]) < total_weekly_periods: class_requirements[c].append(("-", "-"))
+            random.shuffle(class_requirements[c])
+            class_requirements[c] = class_requirements[c][:total_weekly_periods]
+        while len(class_requirements[c]) < total_weekly_periods:
+            class_requirements[c].append(("-", "-"))
         
     return classes_list, period_labels, valid_periods, initial_timetable, initial_busy_teachers, class_requirements, rule_max_consecutive
 
@@ -164,6 +201,74 @@ def prepare_engine_data():
 st.title("🏫 Advanced Timetable Pro (Triple AI System)")
 
 # ================= STATE INITIALIZATION =================
-if "working_days" not in st.session_state: st.session_state.working_days = 6
-if "periods_per_day" not in st.session_state: st.session_state.periods_per_day = 8
-if "break_at" not in st.session_state: st.
+if "working_days" not in st.session_state:
+    st.session_state.working_days = 6
+
+if "periods_per_day" not in st.session_state:
+    st.session_state.periods_per_day = 8
+
+if "break_at" not in st.session_state:
+    st.session_state.break_at = 4
+
+if "saturday_half_day" not in st.session_state:
+    st.session_state.saturday_half_day = False
+
+if "periods_timing_df" not in st.session_state:
+    slots = [{"Slot": f"Period {i}", "Duration (Mins)": 40} for i in range(1, 9)]
+    slots.insert(4, {"Slot": "LUNCH BREAK", "Duration (Mins)": 40})
+    st.session_state.periods_timing_df = pd.DataFrame(slots)
+
+if "classes_df" not in st.session_state:
+    st.session_state.classes_df = pd.DataFrame({"Class Name": ["1st A", "1st B"]})
+
+if "teachers_df" not in st.session_state:
+    st.session_state.teachers_df = pd.DataFrame({
+        "Teacher Name": ["Mr. Rohan", "Coach Ravi"],
+        "Subject": ["Maths", "Sports"],
+        "Allowed Classes": ["All", "All"],
+        "Periods/Week (Per Class)": [6, 4]
+    })
+
+if "rules_df" not in st.session_state:
+    st.session_state.rules_df = pd.DataFrame({"Rule": []})
+
+if "ai3_messages" not in st.session_state: 
+    st.session_state.ai3_messages = [{
+        "role": "assistant",
+        "content": "Namaste Sir! Main AI-3 (The Fixer) hoon. Agar aapka timetable Google OR-Tools par fail ho raha hai, toh upar wala **'Auto-Analyze'** button dabayein!"
+    }]
+
+# ================= UI TABS =================
+tab1, tab2, tab3, tab4, tab5 = st.tabs(["🕒 Timings", "🏫 Classes", "👨🏫 Teachers", "⚙️ Rules", "🚀💬 AI & Engine Center"])
+
+with tab1:
+    col1, col2 = st.columns(2)
+    with col1:
+        st.session_state.working_days = st.number_input("1. Working Days", min_value=1, max_value=7, value=int(st.session_state.working_days))
+        st.session_state.periods_per_day = st.number_input("2. Periods per Day", min_value=1, max_value=20, value=int(st.session_state.periods_per_day))
+        st.session_state.break_at = st.number_input("Lunch Break AFTER period?", min_value=1, max_value=15, value=int(st.session_state.break_at))
+        st.session_state.saturday_half_day = st.checkbox("4. Saturday Half-Day?", value=st.session_state.saturday_half_day)
+    with col2:
+        st.session_state.periods_timing_df = st.data_editor(st.session_state.periods_timing_df, use_container_width=True, hide_index=True)
+
+with tab2:
+    st.session_state.classes_df = st.data_editor(st.session_state.classes_df, num_rows="dynamic", use_container_width=True)
+
+with tab3:
+    st.session_state.teachers_df = st.data_editor(st.session_state.teachers_df, num_rows="dynamic", use_container_width=True)
+
+with tab4:
+    st.session_state.rules_df = st.data_editor(st.session_state.rules_df, num_rows="dynamic", use_container_width=True)
+
+with tab5:
+    st.markdown("### 🛠️ Step 1 & 2: Setup Data & Run Engine")
+    col_chat, col_engine = st.columns([4, 6], gap="large")
+    
+    with col_chat:
+        if "chat_messages" not in st.session_state:
+            st.session_state.chat_messages = []
+        chat_container = st.container(height=300)
+        with chat_container:
+            for message in st.session_state.chat_messages:
+                if message["role"] != "system":
+                    with st.chat_message(message["role"]):
