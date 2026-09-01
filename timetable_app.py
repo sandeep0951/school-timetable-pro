@@ -63,9 +63,9 @@ def chat_ai(messages):
         "model": "deepseek-ai/deepseek-v4-pro-0813",
         "messages": safe_messages,
         "temperature": 0.1,
-        "max_tokens": 100
+        "max_tokens": 1500
     }
-    response = requests.post(url, headers=headers, json=payload, timeout=90)
+    response = requests.post(url, headers=headers, json=payload, timeout=240)
     if response.status_code != 200:
         raise Exception(f"Chat AI Error: {response.text}")
     return response.json()["choices"][0]["message"]["content"]
