@@ -304,7 +304,6 @@ if "rules_df" not in st.session_state:
 if "chat_messages" not in st.session_state:
   st.session_state.chat_messages = []
 
-# No dummy rules like Assembly pre-filled
 if "day_rules_df" not in st.session_state:
   st.session_state.day_rules_df = pd.DataFrame(
       columns=["Day", "Rule Type", "Target", "Value", "Status"]
@@ -751,10 +750,10 @@ with tab5:
 
 # ================= TAB 6: NEW DEDICATED DAY-BY-DAY CUSTOM STUDIO =================
 with tab_custom:
-  st.header("📅 Interactive Day-by-Day Timetable Studio")
+  st.header("📅 Class-Specific Interactive Timetable Studio")
   st.markdown(
-      "Yahan aap har period cell par click karke **dropdown se Teacher &"
-      " Subject chun sakte hain** aur apne rules khud apply kar sakte hain."
+      "Yahan dropdown mein **sirf wahi teachers dikhenge jo us class/section"
+      " ko padhate hain**."
   )
 
   col_d1, col_d2 = st.columns([4, 6])
@@ -767,7 +766,7 @@ with tab_custom:
         "Friday",
         "Saturday",
     ][: int(st.session_state.working_days)]
-    selected_day = st.selectbox("📅 Select Day to Edit:", working_days_list)
+    selected_day = st.selectbox("📅 1. Select Day to Edit:", working_days_list)
 
   classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
   teachers_list = st.session_state.teachers_df.to_dict("records")
@@ -775,30 +774,19 @@ with tab_custom:
   break_p = int(st.session_state.break_at)
   periods = [f"P{i}" for i in range(1, p_count + 1)]
 
-  # Dropdown options (Teachers + Subjects + Lunch + Free Period)
-  dropdown_options = ["- (Free Period)", "☕ LUNCH / BREAK"]
-  for t in teachers_list:
-    t_name = str(t.get("Teacher Name", "")).strip()
-    sub = str(t.get("Subject", "")).strip()
-    if t_name and sub:
-      opt = f"{sub} ({t_name})"
-      if opt not in dropdown_options:
-        dropdown_options.append(opt)
-
-  # Initialize day grid in session_state if not present
+  # Ensure grid exists for selected day
   if selected_day not in st.session_state.manual_grids:
     initial_rows = []
     for c in classes_list:
       row = {"Class / Section": c}
       for idx, p in enumerate(periods, 1):
-        if idx == break_p:
-          row[p] = "☕ LUNCH / BREAK"
-        else:
-          row[p] = "- (Free Period)"
+        row[p] = "☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)"
       initial_rows.append(row)
     st.session_state.manual_grids[selected_day] = pd.DataFrame(initial_rows)
 
-  # Quick Actions: Auto-Fill via OR-Tools or Clear
+  current_day_df = st.session_state.manual_grids[selected_day]
+
+  # Quick action buttons: Auto-fill ya Clear
   with col_d2:
     st.markdown("<br>", unsafe_allow_html=True)
     c_act1, c_act2 = st.columns(2)
@@ -806,80 +794,138 @@ with tab_custom:
       if st.button(
           f"⚡ Auto-Fill {selected_day} (OR-Tools)", use_container_width=True
       ):
-        active_t = [
-            t
-            for t in teachers_list
-            if str(t.get("Teacher Name")).strip() and str(t.get("Subject")).strip()
-        ]
-        if active_t:
-          new_rows = []
-          shuffled_t = list(active_t)
-          for c_idx, c in enumerate(classes_list):
-            row = {"Class / Section": c}
-            for idx, p in enumerate(periods, 1):
-              if idx == break_p:
-                row[p] = "☕ LUNCH / BREAK"
-              else:
-                t_choice = shuffled_t[(c_idx + idx) % len(shuffled_t)]
-                row[p] = (
-                    f"{t_choice.get('Subject')} ({t_choice.get('Teacher Name')})"
-                )
-            new_rows.append(row)
-          st.session_state.manual_grids[selected_day] = pd.DataFrame(new_rows)
-          st.rerun()
+        new_rows = []
+        for c in classes_list:
+          eligible_t = [
+              t
+              for t in teachers_list
+              if c
+              in parse_allowed_classes(
+                  t.get("Allowed Classes", ""), classes_list
+              )
+              and str(t.get("Teacher Name", "")).strip()
+          ]
+          row = {"Class / Section": c}
+          for idx, p in enumerate(periods, 1):
+            if idx == break_p:
+              row[p] = "☕ LUNCH / BREAK"
+            elif eligible_t:
+              t_choice = eligible_t[(idx - 1) % len(eligible_t)]
+              row[p] = (
+                  f"{t_choice.get('Subject')} ({t_choice.get('Teacher Name')})"
+              )
+            else:
+              row[p] = "- (Free Period)"
+          new_rows.append(row)
+        st.session_state.manual_grids[selected_day] = pd.DataFrame(new_rows)
+        st.rerun()
 
     with c_act2:
       if st.button(f"🗑️ Clear {selected_day}", use_container_width=True):
-        initial_rows = []
+        new_rows = []
         for c in classes_list:
           row = {"Class / Section": c}
           for idx, p in enumerate(periods, 1):
             row[p] = (
                 "☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)"
             )
-          initial_rows.append(row)
-        st.session_state.manual_grids[selected_day] = pd.DataFrame(initial_rows)
+          new_rows.append(row)
+        st.session_state.manual_grids[selected_day] = pd.DataFrame(new_rows)
         st.rerun()
 
-  # Dropdown Configuration for each period column
-  col_config = {
+  st.markdown("---")
+
+  # 2. CLASS SELECTOR - Jisse dropdown usi class ke teachers ka bane
+  st.subheader("🎯 2. Class / Section Customize Karein")
+  selected_class = st.selectbox(
+      "Class / Section Chunein:",
+      classes_list,
+      help=(
+          "Is class ke dropdown mein kewal wahi teachers aayenge jo ise padhane"
+          " ke liye allowed hain."
+      ),
+  )
+
+  # Filter teachers ONLY for this selected_class
+  class_eligible_options = ["- (Free Period)", "☕ LUNCH / BREAK"]
+  for t in teachers_list:
+    t_name = str(t.get("Teacher Name", "")).strip()
+    sub = str(t.get("Subject", "")).strip()
+    allowed = parse_allowed_classes(t.get("Allowed Classes", ""), classes_list)
+    if selected_class in allowed and t_name and sub:
+      opt = f"{sub} ({t_name})"
+      if opt not in class_eligible_options:
+        class_eligible_options.append(opt)
+
+  st.caption(
+      f"👉 **{selected_class}** ke eligible teachers: "
+      + (
+          ", ".join(
+              [
+                  opt
+                  for opt in class_eligible_options
+                  if opt not in ["- (Free Period)", "☕ LUNCH / BREAK"]
+              ]
+          )
+          or "⚠️ Koi teacher assigned nahi mila"
+      )
+  )
+
+  # Is selected class ki row nikalein
+  class_mask = current_day_df["Class / Section"] == selected_class
+  if class_mask.any():
+    class_row_df = current_day_df[class_mask].copy()
+  else:
+    class_row_dict = {
+        "Class / Section": selected_class,
+        **{
+            p: ("☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)")
+            for idx, p in enumerate(periods, 1)
+        },
+    }
+    class_row_df = pd.DataFrame([class_row_dict])
+
+  # Column configuration mein sirf is class ke allowed teachers dalein
+  class_col_config = {
       "Class / Section": st.column_config.TextColumn(
           "Class / Section", disabled=True
       )
   }
   for p in periods:
-    col_config[p] = st.column_config.SelectboxColumn(
+    class_col_config[p] = st.column_config.SelectboxColumn(
         p,
-        help="Click to select Teacher / Subject from dropdown",
+        help=f"{selected_class} ke allowed teachers mein se select karein",
         width="medium",
-        options=dropdown_options,
+        options=class_eligible_options,
         required=True,
     )
 
-  st.subheader(f"📝 {selected_day} Timetable Grid")
-  st.caption(
-      "💡 **How to edit:** Kisi bhi cell par click ya double-click karein aur"
-      " dropdown se teacher choose karein."
-  )
-
-  current_df = st.session_state.manual_grids[selected_day]
-  edited_df = st.data_editor(
-      current_df,
-      column_config=col_config,
+  edited_class_df = st.data_editor(
+      class_row_df,
+      column_config=class_col_config,
       use_container_width=True,
       hide_index=True,
-      key=f"grid_editor_{selected_day}",
+      key=f"editor_{selected_day}_{selected_class}",
   )
-  st.session_state.manual_grids[selected_day] = edited_df
 
-  # Live Conflict & Clash Detection
+  # Master grid update karein
+  for idx, row in edited_class_df.iterrows():
+    for p in periods:
+      current_day_df.loc[
+          current_day_df["Class / Section"] == selected_class, p
+      ] = row[p]
+  st.session_state.manual_grids[selected_day] = current_day_df
+
+  # 3. MASTER OVERVIEW TABLE FOR ALL CLASSES
   st.markdown("---")
-  st.subheader("🔍 Live Conflict & Clash Checker")
+  st.subheader(f"📊 {selected_day} Master Timetable (All Classes)")
+  st.dataframe(current_day_df, use_container_width=True, hide_index=True)
 
+  # 4. LIVE CONFLICT & CLASH CHECKER
   clashes_found = []
   for p in periods:
     period_teachers = {}
-    for _, row in edited_df.iterrows():
+    for _, row in current_day_df.iterrows():
       cls_name = row["Class / Section"]
       val = str(row.get(p, ""))
       if (
@@ -909,7 +955,7 @@ with tab_custom:
         " double-booked nahi hai. Schedule bilkul valid hai!"
     )
 
-  # Full Week Exporter
+  # 5. FULL WEEK EXPORTER
   st.markdown("---")
   st.subheader("📥 Export Complete Week")
   if st.button("Generate Full Weekly Summary & Download CSV"):
@@ -921,7 +967,7 @@ with tab_custom:
         all_days.append(d_df)
     if all_days:
       master_week_df = pd.concat(all_days)
-      st.dataframe(master_week_df, use_container_width=True)
+      st.dataframe(master_week_df, use_container_width=True, hide_index=True)
       st.download_button(
           label="📥 Download All Days (CSV)",
           data=master_week_df.to_csv(index=False).encode("utf-8"),
