@@ -17,8 +17,8 @@ with st.sidebar:
   st.header("🔑 API Keys Setup")
   st.markdown(
       "Triple AI Architecture:\n1. Chat Collector: DeepSeek V4\n2. JSON Sync:"
-      " DeepSeek V4\n3. Rule Fixer: DeepSeek V4\n4. **OR-Tools Rule Sync"
-      " Agent**"
+      " DeepSeek V4\n3. Rule Fixer: DeepSeek V4\n4. **Interactive Custom"
+      " Studio**"
   )
   nvidia_api_key = st.text_input(
       "Nvidia Master Key (nvapi-...)", type="password"
@@ -97,7 +97,6 @@ def parse_allowed_classes(allowed_str, all_classes):
         if c not in matched:
           matched.append(c)
 
-  # Fallback: Agar match na ho to empty list ke bajay all classes le taaki Free Period na bane
   return matched if matched else list(all_classes)
 
 
@@ -159,7 +158,6 @@ def prepare_engine_data():
       if "LUNCH" in label:
         initial_timetable[c][idx] = "LUNCH / BREAK"
 
-  # Group teachers by subject
   subjects_map = {}
   for t in teachers_list:
     sub = str(t.get("Subject", "")).strip()
@@ -193,7 +191,6 @@ def prepare_engine_data():
       for _ in range(p_count):
         class_requirements[c].append((chosen["name"], sub))
 
-  # FIX: Free Period bharne ke bajay available subjects ko cycle karke pura slot fill karein
   for c in classes_list:
     req_pool = list(class_requirements[c])
     idx = 0
@@ -224,12 +221,15 @@ if "break_at" not in st.session_state:
   st.session_state.break_at = 4
 if "saturday_half_day" not in st.session_state:
   st.session_state.saturday_half_day = False
+
 if "periods_timing_df" not in st.session_state:
   slots = [{"Slot": f"Period {i}", "Duration (Mins)": 45} for i in range(1, 8)]
   slots.insert(4, {"Slot": "LUNCH BREAK", "Duration (Mins)": 30})
   st.session_state.periods_timing_df = pd.DataFrame(slots)
+
 if "classes_df" not in st.session_state:
   st.session_state.classes_df = pd.DataFrame({"Class Name": ["1-A", "1-B"]})
+
 if "teachers_df" not in st.session_state:
   st.session_state.teachers_df = pd.DataFrame([
       {
@@ -287,6 +287,7 @@ if "teachers_df" not in st.session_state:
           "Periods/Week (Per Class)": 3,
       },
   ])
+
 if "rules_df" not in st.session_state:
   st.session_state.rules_df = pd.DataFrame({
       "Rule": [
@@ -299,34 +300,18 @@ if "rules_df" not in st.session_state:
           "No teacher conflict and no consecutive same subjects.",
       ]
   })
+
 if "chat_messages" not in st.session_state:
   st.session_state.chat_messages = []
 
-# Day-by-Day Custom Rules Matrix State
+# No dummy rules like Assembly pre-filled
 if "day_rules_df" not in st.session_state:
-  st.session_state.day_rules_df = pd.DataFrame([
-      {
-          "Day": "Monday",
-          "Rule Type": "ASSEMBLY_SLOT",
-          "Target": "All",
-          "Value": "1",
-          "Status": "Active",
-      },
-      {
-          "Day": "Tuesday",
-          "Rule Type": "TEACHER_LEAVE",
-          "Target": "Kavita Joshi",
-          "Value": "",
-          "Status": "Active",
-      },
-      {
-          "Day": "Wednesday",
-          "Rule Type": "DOUBLE_PERIOD_LAB",
-          "Target": "Science",
-          "Value": "1-A",
-          "Status": "Active",
-      },
-  ])
+  st.session_state.day_rules_df = pd.DataFrame(
+      columns=["Day", "Rule Type", "Target", "Value", "Status"]
+  )
+
+if "manual_grids" not in st.session_state:
+  st.session_state.manual_grids = {}
 
 st.title("🏫 Advanced Timetable Pro (Triple AI System)")
 
@@ -340,6 +325,7 @@ tab1, tab2, tab3, tab4, tab5, tab_custom = st.tabs([
     "📅 Day-by-Day Custom Studio",
 ])
 
+# ================= TAB 1: TIMINGS =================
 with tab1:
   col1, col2 = st.columns(2)
   with col1:
@@ -362,21 +348,25 @@ with tab1:
         hide_index=True,
     )
 
+# ================= TAB 2: CLASSES =================
 with tab2:
   st.session_state.classes_df = st.data_editor(
       st.session_state.classes_df, num_rows="dynamic", use_container_width=True
   )
 
+# ================= TAB 3: TEACHERS =================
 with tab3:
   st.session_state.teachers_df = st.data_editor(
       st.session_state.teachers_df, num_rows="dynamic", use_container_width=True
   )
 
+# ================= TAB 4: RULES =================
 with tab4:
   st.session_state.rules_df = st.data_editor(
       st.session_state.rules_df, num_rows="dynamic", use_container_width=True
   )
 
+# ================= TAB 5: AI & ENGINE CENTER =================
 with tab5:
   st.markdown("### 🛠️ Step 1 & 2: Setup Data & Run Engine")
   col_chat, col_engine = st.columns([4, 6], gap="large")
@@ -555,7 +545,6 @@ with tab5:
               for c in c_list
           }
 
-          # 1. Exactly one assignment per period slot
           for c in c_list:
             for p in v_periods:
               model.AddExactlyOne(
@@ -564,7 +553,6 @@ with tab5:
             for r_idx in range(len(reqs[c])):
               model.AddExactlyOne([x[c][p][r_idx] for p in v_periods])
 
-          # 2. Strict Teacher Conflict Prevention
           all_teachers = {
               req[0] for c in c_list for req in reqs[c] if req[0] != "-"
           }
@@ -579,7 +567,6 @@ with tab5:
               if len(t_assigns) > 1:
                 model.AddAtMostOne(t_assigns)
 
-          # 3. Subject Distribution & Core Subject Daily Requirement
           for c in c_list:
             sub_to_indices = {}
             for r_idx, req in enumerate(reqs[c]):
@@ -602,7 +589,6 @@ with tab5:
                 if is_core_subject(sub) and total_sub_periods >= num_days:
                   model.Add(day_sub_sum >= 1)
 
-          # 4. Consecutive Same Subject Avoidance
           for c in c_list:
             sub_to_indices = {}
             for r_idx, req in enumerate(reqs[c]):
@@ -621,7 +607,6 @@ with tab5:
                       <= 1
                   )
 
-          # 5. First Period Free Period Avoidance
           for c in c_list:
             non_free_count = sum(1 for req in reqs[c] if req[0] != "-")
             free_r_indices = [
@@ -632,7 +617,6 @@ with tab5:
                 p1 = d_periods[0]
                 model.Add(sum(x[c][p1][r_idx] for r_idx in free_r_indices) == 0)
 
-          # 6. Dynamic Teacher Daily Workload Cap
           for teacher in all_teachers:
             total_t_periods = sum(
                 1 for c in c_list for req in reqs[c] if req[0] == teacher
@@ -651,7 +635,6 @@ with tab5:
               if len(t_daily_assigns) > t_daily_cap:
                 model.Add(sum(t_daily_assigns) <= t_daily_cap)
 
-          # 7. Pedagogical Optimization
           obj_terms = []
           for c in c_list:
             for r_idx, req in enumerate(reqs[c]):
@@ -766,7 +749,7 @@ with tab5:
         except Exception as e:
           st.error(f"AI 3 Error: {e}")
 
-# ================= TAB 6: INTERACTIVE DROPDOWN STUDIO =================
+# ================= TAB 6: NEW DEDICATED DAY-BY-DAY CUSTOM STUDIO =================
 with tab_custom:
   st.header("📅 Interactive Day-by-Day Timetable Studio")
   st.markdown(
@@ -792,7 +775,7 @@ with tab_custom:
   break_p = int(st.session_state.break_at)
   periods = [f"P{i}" for i in range(1, p_count + 1)]
 
-  # 1. Dropdown options tayar karein (Teachers + Subjects + Lunch + Free)
+  # Dropdown options (Teachers + Subjects + Lunch + Free Period)
   dropdown_options = ["- (Free Period)", "☕ LUNCH / BREAK"]
   for t in teachers_list:
     t_name = str(t.get("Teacher Name", "")).strip()
@@ -802,10 +785,7 @@ with tab_custom:
       if opt not in dropdown_options:
         dropdown_options.append(opt)
 
-  # 2. Session state mein har din ka editable grid store karein
-  if "manual_grids" not in st.session_state:
-    st.session_state.manual_grids = {}
-
+  # Initialize day grid in session_state if not present
   if selected_day not in st.session_state.manual_grids:
     initial_rows = []
     for c in classes_list:
@@ -818,7 +798,7 @@ with tab_custom:
       initial_rows.append(row)
     st.session_state.manual_grids[selected_day] = pd.DataFrame(initial_rows)
 
-  # Quick Actions: Auto-Fill via OR-Tools ya Reset Blank
+  # Quick Actions: Auto-Fill via OR-Tools or Clear
   with col_d2:
     st.markdown("<br>", unsafe_allow_html=True)
     c_act1, c_act2 = st.columns(2)
@@ -826,7 +806,6 @@ with tab_custom:
       if st.button(
           f"⚡ Auto-Fill {selected_day} (OR-Tools)", use_container_width=True
       ):
-        # OR-Tools se conflict-free fill karein taaki user ko starting base mil jaye
         active_t = [
             t
             for t in teachers_list
@@ -862,7 +841,7 @@ with tab_custom:
         st.session_state.manual_grids[selected_day] = pd.DataFrame(initial_rows)
         st.rerun()
 
-  # 3. Streamlit Data Editor with Dropdown Column Configuration
+  # Dropdown Configuration for each period column
   col_config = {
       "Class / Section": st.column_config.TextColumn(
           "Class / Section", disabled=True
@@ -893,7 +872,7 @@ with tab_custom:
   )
   st.session_state.manual_grids[selected_day] = edited_df
 
-  # 4. Live Conflict & Clash Detection (Aapke rules check karne ke liye)
+  # Live Conflict & Clash Detection
   st.markdown("---")
   st.subheader("🔍 Live Conflict & Clash Checker")
 
@@ -909,7 +888,6 @@ with tab_custom:
           and val != "☕ LUNCH / BREAK"
           and "(" in val
       ):
-        # Teacher ka naam extract karein
         t_match = re.search(r"\((.*?)\)", val)
         if t_match:
           t_name = t_match.group(1).strip()
@@ -931,7 +909,7 @@ with tab_custom:
         " double-booked nahi hai. Schedule bilkul valid hai!"
     )
 
-  # 5. Full Week Exporter
+  # Full Week Exporter
   st.markdown("---")
   st.subheader("📥 Export Complete Week")
   if st.button("Generate Full Weekly Summary & Download CSV"):
@@ -945,11 +923,8 @@ with tab_custom:
       master_week_df = pd.concat(all_days)
       st.dataframe(master_week_df, use_container_width=True)
       st.download_button(
-          "📥 Download All Days (CSV)",
-          master_week_df.to_csv(index=False).encode("utf-8"),
-          "weekly_timetable.csv",
-          "text/csv",
+          label="📥 Download All Days (CSV)",
+          data=master_week_df.to_csv(index=False).encode("utf-8"),
+          file_name="weekly_timetable.csv",
+          mime="text/csv",
       )
-            "week_schedule.csv",
-            "text/csv",
-        )
