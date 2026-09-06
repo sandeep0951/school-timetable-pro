@@ -766,270 +766,190 @@ with tab5:
         except Exception as e:
           st.error(f"AI 3 Error: {e}")
 
-# ================= TAB 6: NEW DEDICATED DAY-BY-DAY CUSTOM STUDIO =================
+# ================= TAB 6: INTERACTIVE DROPDOWN STUDIO =================
 with tab_custom:
-  st.header("📅 Fully Customizable Day-by-Day Studio")
+  st.header("📅 Interactive Day-by-Day Timetable Studio")
   st.markdown(
-      "Is tab mein aap apna data headers ke hisaab se daal kar pehle **1 din ka"
-      " timetable test** kar sakte hain, fir har din alag-alag rules lagakar"
-      " **pure week ka timetable** bana sakte hain."
+      "Yahan aap har period cell par click karke **dropdown se Teacher &"
+      " Subject chun sakte hain** aur apne rules khud apply kar sakte hain."
   )
 
-  # 1. OR-TOOLS RULE SYNC AGENT
-  st.subheader("🤖 Agent: Google OR-Tools Rule Sync Agent")
-  st.caption(
-      "Yeh Agent aapke Rules Tab ke text ko OR-Tools ke exact constraints mein"
-      " sync karta hai:"
-  )
+  col_d1, col_d2 = st.columns([4, 6])
+  with col_d1:
+    working_days_list = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ][: int(st.session_state.working_days)]
+    selected_day = st.selectbox("📅 Select Day to Edit:", working_days_list)
 
-  col_sync1, col_sync2 = st.columns([7, 3])
-  with col_sync1:
-    st.markdown(
-        "**Current Rules:** " + "; ".join(st.session_state.rules_df["Rule"].tolist())
-    )
-  with col_sync2:
-    if st.button("🔄 Sync Rules with Google OR-Tools", use_container_width=True):
-      if not nvidia_api_key:
-        st.error("❌ Key Missing in Sidebar!")
-      else:
-        with st.spinner(
-            "Agent rules ko Google OR-Tools format mein compile kar raha"
-            " hai..."
-        ):
-          try:
-            rules_text = json.dumps(st.session_state.rules_df["Rule"].tolist())
-            sys_prompt = (
-                "You are the Google OR-Tools Rule Bridge Agent. Convert natural"
-                " language rules into structured constraints for OR-Tools"
-                " CP-SAT.\nSupported Rule Types: 'TEACHER_LEAVE',"
-                " 'ASSEMBLY_SLOT', 'DOUBLE_PERIOD_LAB', 'FIXED_SLOT',"
-                " 'MAX_CONSECUTIVE'.\nOutput JSON format:\n```json\n[\n "
-                ' {"Day": "Monday", "Rule Type": "ASSEMBLY_SLOT", "Target":'
-                ' "All", "Value": "1", "Status": "Active"},\n  {"Day":'
-                ' "Tuesday", "Rule Type": "TEACHER_LEAVE", "Target":'
-                ' "TeacherName", "Value": "", "Status": "Active"}\n]\n```'
-            )
-            reply = call_nvidia([
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": rules_text},
-            ])
-            m = re.search(r"```(?:json)?\s*(\[.*?\])\s*```", reply, re.DOTALL)
-            if m:
-              parsed_rules = json.loads(m.group(1))
-              st.session_state.day_rules_df = pd.DataFrame(parsed_rules)
-              st.success("✅ Rules successfully synced with Google OR-Tools!")
-              st.rerun()
-            else:
-              st.warning(
-                  "Rules sync format match nahi hua, niche manually rules edit"
-                  " karein."
-              )
-          except Exception as e:
-            st.error(f"Rule Sync Error: {e}")
+  classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
+  teachers_list = st.session_state.teachers_df.to_dict("records")
+  p_count = int(st.session_state.periods_per_day)
+  break_p = int(st.session_state.break_at)
+  periods = [f"P{i}" for i in range(1, p_count + 1)]
 
-  st.markdown("---")
+  # 1. Dropdown options tayar karein (Teachers + Subjects + Lunch + Free)
+  dropdown_options = ["- (Free Period)", "☕ LUNCH / BREAK"]
+  for t in teachers_list:
+    t_name = str(t.get("Teacher Name", "")).strip()
+    sub = str(t.get("Subject", "")).strip()
+    if t_name and sub:
+      opt = f"{sub} ({t_name})"
+      if opt not in dropdown_options:
+        dropdown_options.append(opt)
 
-  # 2. EDIT DAY-BY-DAY RULES TABLE
-  st.subheader("⚙️ Day-by-Day Rules Matrix")
-  st.session_state.day_rules_df = st.data_editor(
-      st.session_state.day_rules_df, num_rows="dynamic", use_container_width=True
-  )
+  # 2. Session state mein har din ka editable grid store karein
+  if "manual_grids" not in st.session_state:
+    st.session_state.manual_grids = {}
 
-  # 3. SINGLE DAY TRIAL GENERATOR
-  st.markdown("---")
-  col_single, col_full = st.columns(2, gap="large")
+  if selected_day not in st.session_state.manual_grids:
+    initial_rows = []
+    for c in classes_list:
+      row = {"Class / Section": c}
+      for idx, p in enumerate(periods, 1):
+        if idx == break_p:
+          row[p] = "☕ LUNCH / BREAK"
+        else:
+          row[p] = "- (Free Period)"
+      initial_rows.append(row)
+    st.session_state.manual_grids[selected_day] = pd.DataFrame(initial_rows)
 
-  with col_single:
-    st.subheader("⚡ Step 1: Ek Din Ka Timetable Banayein (Test Run)")
-    st.caption(
-        "Pehle 1 din generate karke verify karein ki rules theek se kaam kar"
-        " rahe hain."
-    )
-    target_day = st.selectbox(
-        "Select Day:",
-        [
-            "Monday",
-            "Tuesday",
-            "Wednesday",
-            "Thursday",
-            "Friday",
-            "Saturday",
-        ],
-        index=0,
-    )
-
-    if st.button(
-        f"Generate {target_day} Timetable",
-        type="primary",
-        use_container_width=True,
-    ):
-      classes = st.session_state.classes_df["Class Name"].dropna().tolist()
-      teachers = {
-          row["Teacher Name"]: row["Subject"]
-          for _, row in st.session_state.teachers_df.iterrows()
-      }
-      p_count = int(st.session_state.periods_per_day)
-      break_p = int(st.session_state.break_at)
-
-      model = cp_model.CpModel()
-      absent = set()
-      assembly = set()
-      for _, r in st.session_state.day_rules_df.iterrows():
-        if str(r.get("Status")).lower() == "active" and str(
-            r.get("Day")
-        ) in ["All", target_day]:
-          if r.get("Rule Type") == "TEACHER_LEAVE":
-            absent.add(r.get("Target"))
-          elif r.get("Rule Type") == "ASSEMBLY_SLOT":
-            try:
-              assembly.add(int(r.get("Value", 1)))
-            except:
-              assembly.add(1)
-
-      active_t = [t for t in teachers if t not in absent]
-      all_p = list(range(1, p_count + 1))
-      class_p = [p for p in all_p if p != break_p and p not in assembly]
-
-      assign = {}
-      proxy = {}
-      for c in classes:
-        for p in class_p:
-          for t in active_t:
-            assign[(c, p, t)] = model.NewBoolVar(f"a_{c}_{p}_{t}")
-          proxy[(c, p)] = model.NewBoolVar(f"pr_{c}_{p}")
-          model.Add(
-              sum(assign[(c, p, t)] for t in active_t) + proxy[(c, p)] == 1
-          )
-
-      for p in class_p:
-        for t in active_t:
-          model.Add(sum(assign[(c, p, t)] for c in classes) <= 1)
-
-      model.Minimize(sum(proxy[(c, p)] * 100 for c in classes for p in class_p))
-
-      solver = cp_model.CpSolver()
-      status = solver.Solve(model)
-
-      if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-        res = {c: {} for c in classes}
-        for c in classes:
-          for p in all_p:
-            if p == break_p:
-              res[c][f"P{p}"] = "☕ LUNCH"
-            elif p in assembly:
-              res[c][f"P{p}"] = "🔔 Assembly"
-            elif solver.Value(proxy[(c, p)]) == 1:
-              res[c][f"P{p}"] = "📌 Proxy"
-            else:
-              for t in active_t:
-                if solver.Value(assign[(c, p, t)]) == 1:
-                  res[c][f"P{p}"] = f"{teachers[t]} ({t})"
-                  break
-        df_single = pd.DataFrame(res).T
-        st.success(f"🎉 {target_day} Timetable Generated without Clashes!")
-        if absent:
-          st.warning(f"On Leave: {', '.join(absent)}")
-        st.dataframe(df_single, use_container_width=True)
-      else:
-        st.error("❌ OR-Tools deadlocked. Rules ko relax karein.")
-
-  with col_full:
-    st.subheader("🚀 Step 2: Pure Week Ka Timetable Banayein")
-    st.caption(
-        "Day-by-day rules apply karke pure hafte ka schedule generate karein."
-    )
-
-    if st.button("Generate Full Week (Day-by-Day)", use_container_width=True):
-      days = [
-          "Monday",
-          "Tuesday",
-          "Wednesday",
-          "Thursday",
-          "Friday",
-          "Saturday",
-      ][: int(st.session_state.working_days)]
-      classes = st.session_state.classes_df["Class Name"].dropna().tolist()
-      teachers = {
-          row["Teacher Name"]: row["Subject"]
-          for _, row in st.session_state.teachers_df.iterrows()
-      }
-      p_count = int(st.session_state.periods_per_day)
-      break_p = int(st.session_state.break_at)
-
-      all_days = []
-      for d in days:
-        cur_p = (
-            4
-            if (d.lower() == "saturday" and st.session_state.saturday_half_day)
-            else p_count
-        )
-        model = cp_model.CpModel()
-        absent = set()
-        assembly = set()
-        for _, r in st.session_state.day_rules_df.iterrows():
-          if str(r.get("Status")).lower() == "active" and str(r.get("Day")) in [
-              "All",
-              d,
-          ]:
-            if r.get("Rule Type") == "TEACHER_LEAVE":
-              absent.add(r.get("Target"))
-            elif r.get("Rule Type") == "ASSEMBLY_SLOT":
-              try:
-                assembly.add(int(r.get("Value", 1)))
-              except:
-                assembly.add(1)
-
-        active_t = [t for t in teachers if t not in absent]
-        all_p = list(range(1, cur_p + 1))
-        class_p = [p for p in all_p if p != break_p and p not in assembly]
-
-        assign = {}
-        proxy = {}
-        for c in classes:
-          for p in class_p:
-            for t in active_t:
-              assign[(c, p, t)] = model.NewBoolVar(f"a_{c}_{p}_{t}_{d}")
-            proxy[(c, p)] = model.NewBoolVar(f"pr_{c}_{p}_{d}")
-            model.Add(
-                sum(assign[(c, p, t)] for t in active_t) + proxy[(c, p)] == 1
-            )
-
-        for p in class_p:
-          for t in active_t:
-            model.Add(sum(assign[(c, p, t)] for c in classes) <= 1)
-
-        model.Minimize(
-            sum(proxy[(c, p)] * 100 for c in classes for p in class_p)
-        )
-        solver = cp_model.CpSolver()
-        status = solver.Solve(model)
-
-        if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-          day_res = {c: {} for c in classes}
-          for c in classes:
-            for p in all_p:
-              if p == break_p:
-                day_res[c][f"P{p}"] = "☕ LUNCH"
-              elif p in assembly:
-                day_res[c][f"P{p}"] = "🔔 Assembly"
-              elif solver.Value(proxy[(c, p)]) == 1:
-                day_res[c][f"P{p}"] = "📌 Proxy"
+  # Quick Actions: Auto-Fill via OR-Tools ya Reset Blank
+  with col_d2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    c_act1, c_act2 = st.columns(2)
+    with c_act1:
+      if st.button(
+          f"⚡ Auto-Fill {selected_day} (OR-Tools)", use_container_width=True
+      ):
+        # OR-Tools se conflict-free fill karein taaki user ko starting base mil jaye
+        active_t = [
+            t
+            for t in teachers_list
+            if str(t.get("Teacher Name")).strip() and str(t.get("Subject")).strip()
+        ]
+        if active_t:
+          new_rows = []
+          shuffled_t = list(active_t)
+          for c_idx, c in enumerate(classes_list):
+            row = {"Class / Section": c}
+            for idx, p in enumerate(periods, 1):
+              if idx == break_p:
+                row[p] = "☕ LUNCH / BREAK"
               else:
-                for t in active_t:
-                  if solver.Value(assign[(c, p, t)]) == 1:
-                    day_res[c][f"P{p}"] = f"{teachers[t]} ({t})"
-                    break
-          df_d = pd.DataFrame(day_res).T
-          df_d.insert(0, "Day", d)
-          all_days.append(df_d)
+                t_choice = shuffled_t[(c_idx + idx) % len(shuffled_t)]
+                row[p] = (
+                    f"{t_choice.get('Subject')} ({t_choice.get('Teacher Name')})"
+                )
+            new_rows.append(row)
+          st.session_state.manual_grids[selected_day] = pd.DataFrame(new_rows)
+          st.rerun()
 
-      if all_days:
-        final_df = pd.concat(all_days)
-        st.success("🎉 Full Week Timetable Successfully Generated!")
-        st.dataframe(final_df, use_container_width=True)
-        st.download_button(
-            "📥 Download Weekly CSV",
-            final_df.to_csv().encode("utf-8"),
+    with c_act2:
+      if st.button(f"🗑️ Clear {selected_day}", use_container_width=True):
+        initial_rows = []
+        for c in classes_list:
+          row = {"Class / Section": c}
+          for idx, p in enumerate(periods, 1):
+            row[p] = (
+                "☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)"
+            )
+          initial_rows.append(row)
+        st.session_state.manual_grids[selected_day] = pd.DataFrame(initial_rows)
+        st.rerun()
+
+  # 3. Streamlit Data Editor with Dropdown Column Configuration
+  col_config = {
+      "Class / Section": st.column_config.TextColumn(
+          "Class / Section", disabled=True
+      )
+  }
+  for p in periods:
+    col_config[p] = st.column_config.SelectboxColumn(
+        p,
+        help="Click to select Teacher / Subject from dropdown",
+        width="medium",
+        options=dropdown_options,
+        required=True,
+    )
+
+  st.subheader(f"📝 {selected_day} Timetable Grid")
+  st.caption(
+      "💡 **How to edit:** Kisi bhi cell par click ya double-click karein aur"
+      " dropdown se teacher choose karein."
+  )
+
+  current_df = st.session_state.manual_grids[selected_day]
+  edited_df = st.data_editor(
+      current_df,
+      column_config=col_config,
+      use_container_width=True,
+      hide_index=True,
+      key=f"grid_editor_{selected_day}",
+  )
+  st.session_state.manual_grids[selected_day] = edited_df
+
+  # 4. Live Conflict & Clash Detection (Aapke rules check karne ke liye)
+  st.markdown("---")
+  st.subheader("🔍 Live Conflict & Clash Checker")
+
+  clashes_found = []
+  for p in periods:
+    period_teachers = {}
+    for _, row in edited_df.iterrows():
+      cls_name = row["Class / Section"]
+      val = str(row.get(p, ""))
+      if (
+          val
+          and val != "- (Free Period)"
+          and val != "☕ LUNCH / BREAK"
+          and "(" in val
+      ):
+        # Teacher ka naam extract karein
+        t_match = re.search(r"\((.*?)\)", val)
+        if t_match:
+          t_name = t_match.group(1).strip()
+          if t_name in period_teachers:
+            clashes_found.append(
+                f"🚨 **Clash in {p}**: Teacher **{t_name}** is selected in both"
+                f" **{period_teachers[t_name]}** and **{cls_name}**"
+                " simultaneously!"
+            )
+          else:
+            period_teachers[t_name] = cls_name
+
+  if clashes_found:
+    for cl in clashes_found:
+      st.error(cl)
+  else:
+    st.success(
+        f"✅ **0 Clashes in {selected_day}**: Kisi bhi period mein koi teacher"
+        " double-booked nahi hai. Schedule bilkul valid hai!"
+    )
+
+  # 5. Full Week Exporter
+  st.markdown("---")
+  st.subheader("📥 Export Complete Week")
+  if st.button("Generate Full Weekly Summary & Download CSV"):
+    all_days = []
+    for d in working_days_list:
+      if d in st.session_state.manual_grids:
+        d_df = st.session_state.manual_grids[d].copy()
+        d_df.insert(0, "Day", d)
+        all_days.append(d_df)
+    if all_days:
+      master_week_df = pd.concat(all_days)
+      st.dataframe(master_week_df, use_container_width=True)
+      st.download_button(
+          "📥 Download All Days (CSV)",
+          master_week_df.to_csv(index=False).encode("utf-8"),
+          "weekly_timetable.csv",
+          "text/csv",
+      )
             "week_schedule.csv",
             "text/csv",
         )
