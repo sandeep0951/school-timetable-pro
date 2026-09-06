@@ -1,335 +1,503 @@
-import streamlit as st
-import pandas as pd
-import json, re, random, sys, requests, time
+import json
+import random
+import re
+import sys
+import time
 from ortools.sat.python import cp_model
+import pandas as pd
+import requests
+import streamlit as st
 
-st.set_page_config(page_title="Advanced Timetable Pro (Triple AI System)", layout="wide")
+st.set_page_config(
+    page_title="Advanced Timetable Pro (Triple AI System)", layout="wide"
+)
 
 # ================= SIDEBAR =================
 with st.sidebar:
-    st.header("🔑 API Keys Setup")
-    st.markdown("Triple AI Architecture:\n1. Chat Collector: DeepSeek V4\n2. JSON Sync: DeepSeek V4\n3. Rule Fixer: DeepSeek V4\n4. **Interactive Custom Studio**")
-    nvidia_api_key = st.text_input("Nvidia Master Key (nvapi-...)", type="password")
-    st.info("🛡️ Bina quotes ke API key dalein.")
+  st.header("🔑 API Keys Setup")
+  st.markdown(
+      "Triple AI Architecture:\n1. Chat Collector: DeepSeek V4\n2. JSON Sync:"
+      " DeepSeek V4\n3. Rule Fixer: DeepSeek V4\n4. **Interactive Custom"
+      " Studio**"
+  )
+  nvidia_api_key = st.text_input(
+      "Nvidia Master Key (nvapi-...)", type="password"
+  )
+  st.info("🛡️ Bina quotes ke API key dalein.")
+
 
 # ================= AI HELPER =================
 def call_nvidia(messages, temp=0.1, max_tokens=4000):
-    url = "https://integrate.api.nvidia.com/v1/chat/completions"
-    key = nvidia_api_key.strip() if nvidia_api_key else ""
-    headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
-    payload = {
-        "model": "deepseek-ai/deepseek-v4-pro-0813",
-        "messages": messages,
-        "temperature": temp,
-        "max_tokens": max_tokens
-    }
-    res = requests.post(url, headers=headers, json=payload, timeout=320)
-    if res.status_code != 200:
-        raise Exception(f"Nvidia API Error: {res.text}")
-    return res.json()["choices"][0]["message"]["content"]
+  url = "https://integrate.api.nvidia.com/v1/chat/completions"
+  key = nvidia_api_key.strip() if nvidia_api_key else ""
+  headers = {
+      "Authorization": f"Bearer {key}",
+      "Content-Type": "application/json",
+  }
+  payload = {
+      "model": "deepseek-ai/deepseek-v4-pro-0813",
+      "messages": messages,
+      "temperature": temp,
+      "max_tokens": max_tokens,
+  }
+  res = requests.post(url, headers=headers, json=payload, timeout=320)
+  if res.status_code != 200:
+    raise Exception(f"Nvidia API Error: {res.text}")
+  return res.json()["choices"][0]["message"]["content"]
+
 
 # ================= ROBUST JSON PARSER =================
 def extract_json_safe(raw_text):
-    if not raw_text:
-        return None
-    cleaned = re.sub(r'<think>.*?</think>', '', raw_text, flags=re.DOTALL)
-    m = re.search(r'```(?:json)?\s*(\{.*?\})\s*```', cleaned, re.DOTALL | re.IGNORECASE)
-    if m:
-        try:
-            return json.loads(m.group(1))
-        except Exception:
-            pass
-    s_idx = cleaned.find("{")
-    e_idx = cleaned.rfind("}")
-    if s_idx != -1 and e_idx != -1 and e_idx > s_idx:
-        raw = cleaned[s_idx:e_idx+1]
-        raw = re.sub(r',\s*}', '}', raw)
-        raw = re.sub(r',\s*]', ']', raw)
-        try:
-            return json.loads(raw)
-        except Exception:
-            pass
+  if not raw_text:
     return None
+  cleaned = re.sub(r"<think>.*?</think>", "", raw_text, flags=re.DOTALL)
+  m = re.search(
+      r"```(?:json)?\s*(\{.*?\})\s*```", cleaned, re.DOTALL | re.IGNORECASE
+  )
+  if m:
+    try:
+      return json.loads(m.group(1))
+    except Exception:
+      pass
+  s_idx = cleaned.find("{")
+  e_idx = cleaned.rfind("}")
+  if s_idx != -1 and e_idx != -1 and e_idx > s_idx:
+    raw = cleaned[s_idx : e_idx + 1]
+    raw = re.sub(r",\s*}", "}", raw)
+    raw = re.sub(r",\s*]", "]", raw)
+    try:
+      return json.loads(raw)
+    except Exception:
+      pass
+  return None
+
 
 # ================= ROBUST RANGE & CLASS PARSER =================
 def parse_allowed_classes(allowed_str, all_classes):
-    s = str(allowed_str).strip()
-    if not s or s.lower() in ["all", "*", "any", ""]:
-        return list(all_classes)
+  s = str(allowed_str).strip()
+  if not s or s.lower() in ["all", "*", "any", ""]:
+    return list(all_classes)
 
-    tokens = [x.strip().lower() for x in re.split(r'[,;]', s) if x.strip()]
-    matched = []
+  tokens = [x.strip().lower() for x in re.split(r"[,;]", s) if x.strip()]
+  matched = []
+  for c in all_classes:
+    c_clean = c.lower().replace(" ", "").replace("-", "").replace("th", "")
+    for tok in tokens:
+      tok_clean = tok.replace(" ", "").replace("-", "").replace("th", "")
+      if tok_clean in c_clean or c.lower() == tok:
+        matched.append(c)
+        break
+
+  range_match = re.search(r"(\d+)\s*(?:to|-)\s*(\d+)", s, re.IGNORECASE)
+  if range_match:
+    sg = int(range_match.group(1))
+    eg = int(range_match.group(2))
     for c in all_classes:
-        c_clean = c.lower().replace(" ", "").replace("-", "").replace("th", "")
-        for tok in tokens:
-            tok_clean = tok.replace(" ", "").replace("-", "").replace("th", "")
-            if tok_clean in c_clean or c.lower() == tok:
-                matched.append(c)
-                break
+      m = re.search(r"(\d+)", c)
+      if m and sg <= int(m.group(1)) <= eg:
+        if c not in matched:
+          matched.append(c)
 
-    range_match = re.search(r'(\d+)\s*(?:to|-)\s*(\d+)', s, re.IGNORECASE)
-    if range_match:
-        sg = int(range_match.group(1))
-        eg = int(range_match.group(2))
-        for c in all_classes:
-            m = re.search(r'(\d+)', c)
-            if m and sg <= int(m.group(1)) <= eg:
-                if c not in matched:
-                    matched.append(c)
+  return matched if matched else list(all_classes)
 
-    return matched if matched else list(all_classes)
 
 # ================= CORE SUBJECT IDENTIFIER =================
 def is_core_subject(subject_name):
-    s = str(subject_name).lower().strip()
-    core_keywords = ["math", "science", "social", "hindi", "english", "evs", "sst", "physics", "chemistry", "biology"]
-    return any(k in s for k in core_keywords)
+  s = str(subject_name).lower().strip()
+  core_keywords = [
+      "math",
+      "science",
+      "social",
+      "hindi",
+      "english",
+      "evs",
+      "sst",
+      "physics",
+      "chemistry",
+      "biology",
+  ]
+  return any(k in s for k in core_keywords)
+
 
 # ================= TIMING HELPER =================
 def update_timing_df(p_count=None, b_at=None):
-    if p_count is None:
-        p_count = int(st.session_state.get("periods_per_day", 7))
-    if b_at is None:
-        b_at = int(st.session_state.get("break_at", 4))
-    slots = []
-    for i in range(1, p_count + 1):
-        slots.append({"Slot": f"Period {i}", "Duration (Mins)": 45})
-        if i == b_at:
-            slots.append({"Slot": "LUNCH BREAK", "Duration (Mins)": 30})
-    return pd.DataFrame(slots)
+  if p_count is None:
+    p_count = int(st.session_state.get("periods_per_day", 7))
+  if b_at is None:
+    b_at = int(st.session_state.get("break_at", 4))
+  slots = []
+  for i in range(1, p_count + 1):
+    slots.append({"Slot": f"Period {i}", "Duration (Mins)": 45})
+    if i == b_at:
+      slots.append({"Slot": "LUNCH BREAK", "Duration (Mins)": 30})
+  return pd.DataFrame(slots)
+
 
 # ================= DATA PREPARATION =================
 def prepare_engine_data():
-    sys.setrecursionlimit(5000)
-    classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
-    teachers_list = st.session_state.teachers_df.to_dict("records")
-    w_days = int(st.session_state.working_days)
-    p_per_day = int(st.session_state.periods_per_day)
-    break_at = int(st.session_state.break_at)
-    is_half = st.session_state.saturday_half_day
+  sys.setrecursionlimit(5000)
+  classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
+  teachers_list = st.session_state.teachers_df.to_dict("records")
+  w_days = int(st.session_state.working_days)
+  p_per_day = int(st.session_state.periods_per_day)
+  break_at = int(st.session_state.break_at)
+  is_half = st.session_state.saturday_half_day
 
-    days_str = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][:w_days]
-    period_labels = []
-    valid_periods = []
-    global_p_idx = 0
+  days_str = [
+      "Monday",
+      "Tuesday",
+      "Wednesday",
+      "Thursday",
+      "Friday",
+      "Saturday",
+  ][:w_days]
+  period_labels = []
+  valid_periods = []
+  global_p_idx = 0
 
-    for d in days_str:
-        current_day_periods = 4 if (d.lower() == "saturday" and is_half) else p_per_day
-        for p in range(1, current_day_periods + 1):
-            global_p_idx += 1
-            period_labels.append(f"{d} - P{p}")
-            valid_periods.append(global_p_idx)
-            if p == break_at and not (d.lower() == "saturday" and is_half):
-                period_labels.append(f"{d} - LUNCH")
+  for d in days_str:
+    current_day_periods = (
+        4 if (d.lower() == "saturday" and is_half) else p_per_day
+    )
+    for p in range(1, current_day_periods + 1):
+      global_p_idx += 1
+      period_labels.append(f"{d} - P{p}")
+      valid_periods.append(global_p_idx)
+      if p == break_at and not (d.lower() == "saturday" and is_half):
+        period_labels.append(f"{d} - LUNCH")
 
-    total_weekly_periods = len(valid_periods)
-    initial_timetable = {c: ["EMPTY"] * len(period_labels) for c in classes_list}
+  total_weekly_periods = len(valid_periods)
+  initial_timetable = {c: ["EMPTY"] * len(period_labels) for c in classes_list}
+  for c in classes_list:
+    for idx, label in enumerate(period_labels):
+      if "LUNCH" in label:
+        initial_timetable[c][idx] = "LUNCH / BREAK"
+
+  subjects_map = {}
+  for t in teachers_list:
+    sub = str(t.get("Subject", "")).strip()
+    if not sub:
+      continue
+    try:
+      p_count = int(t.get("Periods/Week (Per Class)", 4))
+    except Exception:
+      p_count = 4
+    if sub not in subjects_map:
+      subjects_map[sub] = {"periods": p_count, "teachers": []}
+    subjects_map[sub]["teachers"].append({
+        "name": t.get("Teacher Name", ""),
+        "allowed": parse_allowed_classes(
+            t.get("Allowed Classes", ""), classes_list
+        ),
+        "load": 0,
+    })
+
+  class_requirements = {c: [] for c in classes_list}
+  for sub, info in subjects_map.items():
+    p_count = info["periods"]
+    teachers = info["teachers"]
     for c in classes_list:
-        for idx, label in enumerate(period_labels):
-            if "LUNCH" in label:
-                initial_timetable[c][idx] = "LUNCH / BREAK"
+      eligible = [t for t in teachers if c in t["allowed"]]
+      if not eligible:
+        continue
+      eligible.sort(key=lambda x: x["load"])
+      chosen = eligible[0]
+      chosen["load"] += p_count
+      for _ in range(p_count):
+        class_requirements[c].append((chosen["name"], sub))
 
-    subjects_map = {}
-    for t in teachers_list:
-        sub = str(t.get("Subject", "")).strip()
-        if not sub:
-            continue
-        try:
-            p_count = int(t.get("Periods/Week (Per Class)", 4))
-        except Exception:
-            p_count = 4
-        if sub not in subjects_map:
-            subjects_map[sub] = {"periods": p_count, "teachers": []}
-        subjects_map[sub]["teachers"].append({
-            "name": t.get("Teacher Name", ""),
-            "allowed": parse_allowed_classes(t.get("Allowed Classes", ""), classes_list),
-            "load": 0
-        })
+  for c in classes_list:
+    req_pool = list(class_requirements[c])
+    idx = 0
+    while len(class_requirements[c]) < total_weekly_periods:
+      if req_pool:
+        class_requirements[c].append(req_pool[idx % len(req_pool)])
+        idx += 1
+      else:
+        class_requirements[c].append(("-", "Free Period"))
+    if len(class_requirements[c]) > total_weekly_periods:
+      class_requirements[c] = class_requirements[c][:total_weekly_periods]
 
-    class_requirements = {c: [] for c in classes_list}
-    for sub, info in subjects_map.items():
-        p_count = info["periods"]
-        teachers = info["teachers"]
-        for c in classes_list:
-            eligible = [t for t in teachers if c in t["allowed"]]
-            if not eligible:
-                continue
-            eligible.sort(key=lambda x: x["load"])
-            chosen = eligible[0]
-            chosen["load"] += p_count
-            for _ in range(p_count):
-                class_requirements[c].append((chosen["name"], sub))
+  return (
+      classes_list,
+      period_labels,
+      valid_periods,
+      initial_timetable,
+      class_requirements,
+  )
 
-    for c in classes_list:
-        req_pool = list(class_requirements[c])
-        idx = 0
-        while len(class_requirements[c]) < total_weekly_periods:
-            if req_pool:
-                class_requirements[c].append(req_pool[idx % len(req_pool)])
-                idx += 1
-            else:
-                class_requirements[c].append(("-", "Free Period"))
-        if len(class_requirements[c]) > total_weekly_periods:
-            class_requirements[c] = class_requirements[c][:total_weekly_periods]
-
-    return classes_list, period_labels, valid_periods, initial_timetable, class_requirements
 
 # ================= STATE INITIALIZATION =================
-if "working_days" not in st.session_state: st.session_state["working_days"] = 6
-if "periods_per_day" not in st.session_state: st.session_state["periods_per_day"] = 7
-if "break_at" not in st.session_state: st.session_state["break_at"] = 4
-if "saturday_half_day" not in st.session_state: st.session_state["saturday_half_day"] = False
-if "sync_id" not in st.session_state: st.session_state.sync_id = 0
+if "working_days" not in st.session_state:
+  st.session_state["working_days"] = 6
+if "periods_per_day" not in st.session_state:
+  st.session_state["periods_per_day"] = 7
+if "break_at" not in st.session_state:
+  st.session_state["break_at"] = 4
+if "saturday_half_day" not in st.session_state:
+  st.session_state["saturday_half_day"] = False
+if "sync_id" not in st.session_state:
+  st.session_state.sync_id = 0
 
 if "periods_timing_df" not in st.session_state:
-    st.session_state.periods_timing_df = update_timing_df(7, 4)
+  st.session_state.periods_timing_df = update_timing_df(7, 4)
 
 if "classes_df" not in st.session_state:
-    st.session_state.classes_df = pd.DataFrame({"Class Name": ["1-A", "1-B"]})
+  st.session_state.classes_df = pd.DataFrame({"Class Name": ["1-A", "1-B"]})
 
 if "teachers_df" not in st.session_state:
-    st.session_state.teachers_df = pd.DataFrame([
-        {"Teacher Name": "Amit Sharma", "Subject": "English", "Allowed Classes": "all", "Periods/Week (Per Class)": 6},
-        {"Teacher Name": "Rahul Jain", "Subject": "Mathematics", "Allowed Classes": "all", "Periods/Week (Per Class)": 6},
-        {"Teacher Name": "Rajesh Singh", "Subject": "Hindi", "Allowed Classes": "all", "Periods/Week (Per Class)": 6},
-        {"Teacher Name": "Kavita Joshi", "Subject": "Science", "Allowed Classes": "all", "Periods/Week (Per Class)": 6},
-        {"Teacher Name": "Rakesh Gupta", "Subject": "Social Science", "Allowed Classes": "all", "Periods/Week (Per Class)": 6},
-        {"Teacher Name": "Karan Malhotra", "Subject": "Computer", "Allowed Classes": "all", "Periods/Week (Per Class)": 3},
-        {"Teacher Name": "Priyanka Yadav", "Subject": "Art & Craft", "Allowed Classes": "all", "Periods/Week (Per Class)": 3},
-        {"Teacher Name": "Ravi Joshi", "Subject": "Physical Education", "Allowed Classes": "all", "Periods/Week (Per Class)": 3},
-        {"Teacher Name": "Nisha Patel", "Subject": "Library", "Allowed Classes": "all", "Periods/Week (Per Class)": 3}
-    ])
+  st.session_state.teachers_df = pd.DataFrame([
+      {
+          "Teacher Name": "Amit Sharma",
+          "Subject": "English",
+          "Allowed Classes": "all",
+          "Periods/Week (Per Class)": 6,
+      },
+      {
+          "Teacher Name": "Rahul Jain",
+          "Subject": "Mathematics",
+          "Allowed Classes": "all",
+          "Periods/Week (Per Class)": 6,
+      },
+      {
+          "Teacher Name": "Rajesh Singh",
+          "Subject": "Hindi",
+          "Allowed Classes": "all",
+          "Periods/Week (Per Class)": 6,
+      },
+      {
+          "Teacher Name": "Kavita Joshi",
+          "Subject": "Science",
+          "Allowed Classes": "all",
+          "Periods/Week (Per Class)": 6,
+      },
+      {
+          "Teacher Name": "Rakesh Gupta",
+          "Subject": "Social Science",
+          "Allowed Classes": "all",
+          "Periods/Week (Per Class)": 6,
+      },
+      {
+          "Teacher Name": "Karan Malhotra",
+          "Subject": "Computer",
+          "Allowed Classes": "all",
+          "Periods/Week (Per Class)": 3,
+      },
+      {
+          "Teacher Name": "Priyanka Yadav",
+          "Subject": "Art & Craft",
+          "Allowed Classes": "all",
+          "Periods/Week (Per Class)": 3,
+      },
+      {
+          "Teacher Name": "Ravi Joshi",
+          "Subject": "Physical Education",
+          "Allowed Classes": "all",
+          "Periods/Week (Per Class)": 3,
+      },
+      {
+          "Teacher Name": "Nisha Patel",
+          "Subject": "Library",
+          "Allowed Classes": "all",
+          "Periods/Week (Per Class)": 3,
+      },
+  ])
 
 if "rules_df" not in st.session_state:
-    st.session_state.rules_df = pd.DataFrame({"Rule": [
-        "Core subjects (Maths, Science, SST, Hindi, English) daily minimum 1 period.",
-        "Other activities (Computer, Sports, Library, Art) different days par rotate hon.",
-        "No teacher conflict and no consecutive same subjects."
-    ]})
+  st.session_state.rules_df = pd.DataFrame({
+      "Rule": [
+          "Core subjects (Maths, Science, SST, Hindi, English) daily minimum 1"
+          " period.",
+          (
+              "Other activities (Computer, Sports, Library, Art) different days"
+              " par rotate hon."
+          ),
+          "No teacher conflict and no consecutive same subjects.",
+      ]
+  })
 
 if "chat_messages" not in st.session_state:
-    st.session_state.chat_messages = []
+  st.session_state.chat_messages = []
 
 if "day_rules_df" not in st.session_state:
-    st.session_state.day_rules_df = pd.DataFrame(columns=["Day", "Rule Type", "Target", "Value", "Status"])
+  st.session_state.day_rules_df = pd.DataFrame(
+      columns=["Day", "Rule Type", "Target", "Value", "Status"]
+  )
 
 if "manual_grids" not in st.session_state:
-    st.session_state.manual_grids = {}
+  st.session_state.manual_grids = {}
 
 st.title("🏫 Advanced Timetable Pro (Triple AI System)")
 
 # ================= UI TABS =================
 tab1, tab2, tab3, tab4, tab5, tab_custom = st.tabs([
-    "🕒 Timings", "🏫 Classes", "👨🏫 Teachers", "⚙️ Rules", "🚀💬 AI & Engine Center", "📅 Day-by-Day Custom Studio"
+    "🕒 Timings",
+    "🏫 Classes",
+    "👨🏫 Teachers",
+    "⚙️ Rules",
+    "🚀💬 AI & Engine Center",
+    "📅 Day-by-Day Custom Studio",
 ])
 
 # ================= TAB 1: TIMINGS =================
 with tab1:
-    col1, col2 = st.columns(2)
-    with col1:
-        wd = st.number_input("1. Working Days", min_value=1, max_value=7, value=int(st.session_state.working_days), key=f"wd_key_{st.session_state.sync_id}")
-        ppd = st.number_input("2. Periods per Day", min_value=1, max_value=20, value=int(st.session_state.periods_per_day), key=f"ppd_key_{st.session_state.sync_id}")
-        brk = st.number_input("Lunch Break AFTER period?", min_value=1, max_value=15, value=int(st.session_state.break_at), key=f"brk_key_{st.session_state.sync_id}")
-        sat = st.checkbox("4. Saturday Half-Day?", value=bool(st.session_state.saturday_half_day), key=f"sat_key_{st.session_state.sync_id}")
-        st.session_state.working_days = wd
-        st.session_state.periods_per_day = ppd
-        st.session_state.break_at = brk
-        st.session_state.saturday_half_day = sat
-    with col2:
-        st.subheader("Period Timings & Duration")
-        expected_slots = int(st.session_state.periods_per_day) + (1 if int(st.session_state.break_at) > 0 else 0)
-        if len(st.session_state.periods_timing_df) != expected_slots:
-            st.session_state.periods_timing_df = update_timing_df(int(st.session_state.periods_per_day), int(st.session_state.break_at))
-        st.session_state.periods_timing_df = st.data_editor(
-            st.session_state.periods_timing_df,
-            use_container_width=True,
-            hide_index=True,
-            key=f"time_editor_{st.session_state.sync_id}"
-        )
+  col1, col2 = st.columns(2)
+  with col1:
+    wd = st.number_input(
+        "1. Working Days",
+        min_value=1,
+        max_value=7,
+        value=int(st.session_state.working_days),
+        key=f"wd_key_{st.session_state.sync_id}",
+    )
+    ppd = st.number_input(
+        "2. Periods per Day",
+        min_value=1,
+        max_value=20,
+        value=int(st.session_state.periods_per_day),
+        key=f"ppd_key_{st.session_state.sync_id}",
+    )
+    brk = st.number_input(
+        "Lunch Break AFTER period?",
+        min_value=1,
+        max_value=15,
+        value=int(st.session_state.break_at),
+        key=f"brk_key_{st.session_state.sync_id}",
+    )
+    sat = st.checkbox(
+        "4. Saturday Half-Day?",
+        value=bool(st.session_state.saturday_half_day),
+        key=f"sat_key_{st.session_state.sync_id}",
+    )
+    st.session_state.working_days = wd
+    st.session_state.periods_per_day = ppd
+    st.session_state.break_at = brk
+    st.session_state.saturday_half_day = sat
+  with col2:
+    st.subheader("Period Timings & Duration")
+    expected_slots = int(st.session_state.periods_per_day) + (
+        1 if int(st.session_state.break_at) > 0 else 0
+    )
+    if len(st.session_state.periods_timing_df) != expected_slots:
+      st.session_state.periods_timing_df = update_timing_df(
+          int(st.session_state.periods_per_day), int(st.session_state.break_at)
+      )
+    st.session_state.periods_timing_df = st.data_editor(
+        st.session_state.periods_timing_df,
+        use_container_width=True,
+        hide_index=True,
+        key=f"time_editor_{st.session_state.sync_id}",
+    )
 
 # ================= TAB 2: CLASSES =================
 with tab2:
-    st.subheader("🏫 Classes List")
-    st.session_state.classes_df = st.data_editor(
-        st.session_state.classes_df, 
-        num_rows="dynamic", 
-        use_container_width=True, 
-        key=f"classes_editor_{st.session_state.sync_id}"
-    )
+  st.subheader("🏫 Classes List")
+  st.session_state.classes_df = st.data_editor(
+      st.session_state.classes_df,
+      num_rows="dynamic",
+      use_container_width=True,
+      key=f"classes_editor_{st.session_state.sync_id}",
+  )
 
 # ================= TAB 3: TEACHERS =================
 with tab3:
-    st.subheader("👨🏫 Teachers & Subject Allotment")
-    st.session_state.teachers_df = st.data_editor(
-        st.session_state.teachers_df, 
-        num_rows="dynamic", 
-        use_container_width=True, 
-        key=f"teachers_editor_{st.session_state.sync_id}"
-    )
+  st.subheader("👨🏫 Teachers & Subject Allotment")
+  st.session_state.teachers_df = st.data_editor(
+      st.session_state.teachers_df,
+      num_rows="dynamic",
+      use_container_width=True,
+      key=f"teachers_editor_{st.session_state.sync_id}",
+  )
 
 # ================= TAB 4: RULES =================
 with tab4:
-    st.subheader("⚙️ Institutional Rules")
-    st.session_state.rules_df = st.data_editor(
-        st.session_state.rules_df, 
-        num_rows="dynamic", 
-        use_container_width=True, 
-        key=f"rules_editor_{st.session_state.sync_id}"
-    )
+  st.subheader("⚙️ Institutional Rules")
+  st.session_state.rules_df = st.data_editor(
+      st.session_state.rules_df,
+      num_rows="dynamic",
+      use_container_width=True,
+      key=f"rules_editor_{st.session_state.sync_id}",
+  )
 
 # ================= TAB 5: AI & ENGINE CENTER =================
 with tab5:
-    st.markdown("### 🛠️ Step 1 & 2: Setup Data & Run Engine")
-    col_chat, col_engine = st.columns([4, 6], gap="large")
+  st.markdown("### 🛠️ Step 1 & 2: Setup Data & Run Engine")
+  col_chat, col_engine = st.columns([4, 6], gap="large")
 
-    with col_chat:
-        st.subheader("💬 AI-1 Data Collector")
-        chat_box = st.container(height=250)
+  with col_chat:
+    st.subheader("💬 AI-1 Data Collector")
+    chat_box = st.container(height=250)
+    with chat_box:
+      for m in st.session_state.chat_messages:
+        with st.chat_message(m["role"]):
+          st.markdown(m["content"])
+
+    with st.form("chat_form", clear_on_submit=True):
+      user_text = st.text_area("Paste Data Here:", height=80)
+      btn_c1, btn_c2 = st.columns([7, 3])
+      with btn_c1:
+        submit_msg = st.form_submit_button("Send Data 🚀")
+      with btn_c2:
+        if st.form_submit_button("🗑️ Clear"):
+          st.session_state.chat_messages = []
+          st.rerun()
+
+    if submit_msg and user_text:
+      if not nvidia_api_key:
+        st.error("❌ Key Missing in Sidebar!")
+      else:
+        st.session_state.chat_messages.append(
+            {"role": "user", "content": user_text}
+        )
         with chat_box:
-            for m in st.session_state.chat_messages:
-                with st.chat_message(m["role"]):
-                    st.markdown(m["content"])
+          with st.chat_message("user"):
+            st.markdown(user_text)
+        with st.spinner("AI 1 Acknowledging..."):
+          try:
+            sys_prompt = (
+                "You are a receptionist. Acknowledge receipt and say: '✅ Data"
+                " is ready! Please click the Sync Button to update tabs.' DO"
+                " NOT generate timetable."
+            )
+            reply = call_nvidia(
+                [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": user_text},
+                ],
+                max_tokens=2500,
+            )
+            st.session_state.chat_messages.append(
+                {"role": "assistant", "content": reply}
+            )
+            with chat_box:
+              with st.chat_message("assistant"):
+                st.markdown(reply)
+          except Exception as e:
+            st.error(f"AI 1 Error: {e}")
 
-        with st.form("chat_form", clear_on_submit=True):
-            user_text = st.text_area("Paste Data Here:", height=80)
-            btn_c1, btn_c2 = st.columns([7, 3])
-            with btn_c1: submit_msg = st.form_submit_button("Send Data 🚀")
-            with btn_c2:
-                if st.form_submit_button("🗑️ Clear"):
-                    st.session_state.chat_messages = []
-                    st.rerun()
-
-        if submit_msg and user_text:
-            if not nvidia_api_key:
-                st.error("❌ Key Missing in Sidebar!")
-            else:
-                st.session_state.chat_messages.append({"role": "user", "content": user_text})
-                with chat_box:
-                    with st.chat_message("user"): st.markdown(user_text)
-                with st.spinner("AI 1 Acknowledging..."):
-                    try:
-                        sys_prompt = "You are a receptionist. Acknowledge receipt and say: '✅ Data is ready! Please click the Sync Button to update tabs.' DO NOT generate timetable."
-                        reply = call_nvidia([{"role": "system", "content": sys_prompt}, {"role": "user", "content": user_text}], max_tokens=2500)
-                        st.session_state.chat_messages.append({"role": "assistant", "content": reply})
-                        with chat_box:
-                            with st.chat_message("assistant"): st.markdown(reply)
-                    except Exception as e:
-                        st.error(f"AI 1 Error: {e}")
-
-    with col_engine:
-        st.subheader("🔄 AI-2 & Engine Runner")
-        if st.button("🔄 AI 2: Extract & Sync Tabs", use_container_width=True):
-            if not nvidia_api_key:
-                st.error("❌ Key Missing in Sidebar!")
-            else:
-                all_msgs = [m["content"] for m in st.session_state.chat_messages if m["role"] == "user"]
-                full_input = "\n\n".join(all_msgs)
-                if len(full_input.strip()) < 10:
-                    st.warning("⚠️ Pehle chat box mein apna school data paste karke 'Send Data' dabayein!")
-                else:
-                    with st.spinner("AI 2 JSON bana raha hai aur tabs update kar raha hai..."):
-                        try:
-                            sys_p = r"""You are a strict JSON data extractor. Extract timetable parameters from the text and output ONLY RAW JSON matching this exact schema:
+  with col_engine:
+    st.subheader("🔄 AI-2 & Engine Runner")
+    if st.button("🔄 AI 2: Extract & Sync Tabs", use_container_width=True):
+      if not nvidia_api_key:
+        st.error("❌ Key Missing in Sidebar!")
+      else:
+        all_msgs = [
+            m["content"]
+            for m in st.session_state.chat_messages
+            if m["role"] == "user"
+        ]
+        full_input = "\n\n".join(all_msgs)
+        if len(full_input.strip()) < 10:
+          st.warning(
+              "⚠️ Pehle chat box mein apna school data paste karke 'Send Data'"
+              " dabayein!"
+          )
+        else:
+          with st.spinner(
+              "AI 2 JSON bana raha hai aur tabs update kar raha hai..."
+          ):
+            try:
+              sys_p = r"""You are a strict JSON data extractor. Extract timetable parameters from the text and output ONLY RAW JSON matching this exact schema:
 {
   "working_days": 6,
   "periods_per_day": 7,
@@ -346,391 +514,582 @@ with tab5:
   ],
   "fixed_rules": ["Rule 1"]
 }"""
-                            raw_out = call_nvidia([{"role": "system", "content": sys_p}, {"role": "user", "content": full_input}], temp=0.0, max_tokens=4096)
-                            data = extract_json_safe(raw_out)
-                            if data:
-                                if "working_days" in data:
-                                    st.session_state["working_days"] = int(data["working_days"])
-                                if "periods_per_day" in data:
-                                    st.session_state["periods_per_day"] = int(data["periods_per_day"])
-                                if "break_at" in data:
-                                    st.session_state["break_at"] = int(data["break_at"])
-                                if "saturday_half_day" in data:
-                                    st.session_state["saturday_half_day"] = str(data["saturday_half_day"]).lower() == "true"
-                                
-                                st.session_state.periods_timing_df = update_timing_df(
-                                    int(st.session_state["periods_per_day"]), 
-                                    int(st.session_state["break_at"])
-                                )
+              raw_out = call_nvidia(
+                  [
+                      {"role": "system", "content": sys_p},
+                      {"role": "user", "content": full_input},
+                  ],
+                  temp=0.0,
+                  max_tokens=4096,
+              )
+              data = extract_json_safe(raw_out)
+              if data:
+                if "working_days" in data:
+                  st.session_state["working_days"] = int(data["working_days"])
+                if "periods_per_day" in data:
+                  st.session_state["periods_per_day"] = int(
+                      data["periods_per_day"]
+                  )
+                if "break_at" in data:
+                  st.session_state["break_at"] = int(data["break_at"])
+                if "saturday_half_day" in data:
+                  st.session_state["saturday_half_day"] = (
+                      str(data["saturday_half_day"]).lower() == "true"
+                  )
 
-                                if "classes" in data and data["classes"]:
-                                    c_list = data["classes"]
-                                    clean_classes = []
-                                    for item in c_list:
-                                        if isinstance(item, dict):
-                                            clean_classes.append(str(item.get("Class Name") or item.get("name") or list(item.values())[0]))
-                                        else:
-                                            clean_classes.append(str(item))
-                                    st.session_state.classes_df = pd.DataFrame({"Class Name": clean_classes})
-                                
-                                if "teachers" in data and data["teachers"]:
-                                    normalized_teachers = []
-                                    for t in data["teachers"]:
-                                        if isinstance(t, dict):
-                                            t_name = t.get("Teacher Name") or t.get("teacher_name") or t.get("name") or t.get("teacher") or ""
-                                            subj = t.get("Subject") or t.get("subject") or ""
-                                            allowed = t.get("Allowed Classes") or t.get("allowed_classes") or t.get("allowed") or t.get("classes") or "all"
-                                            p_count = t.get("Periods/Week (Per Class)") or t.get("periods_per_week") or t.get("periods") or 6
-                                            normalized_teachers.append({
-                                                "Teacher Name": str(t_name).strip(),
-                                                "Subject": str(subj).strip(),
-                                                "Allowed Classes": str(allowed).strip(),
-                                                "Periods/Week (Per Class)": int(p_count)
-                                            })
-                                    st.session_state.teachers_df = pd.DataFrame(normalized_teachers)
+                st.session_state.periods_timing_df = update_timing_df(
+                    int(st.session_state["periods_per_day"]),
+                    int(st.session_state["break_at"]),
+                )
 
-                                if "fixed_rules" in data and data["fixed_rules"]:
-                                    st.session_state.rules_df = pd.DataFrame({"Rule": [str(r) for r in data["fixed_rules"]]})
-
-                                st.session_state.manual_grids = {}
-                                st.session_state.sync_id += 1
-
-                                st.success("🎉 BINGO! Tabs Successfully Update Ho Gaye!")
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error("❌ AI 2 output parse nahi ho paya. Kripya chat box mein data check karein.")
-                        except Exception as e:
-                            st.error(f"Sync Error: {e}")
-
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.button("🔥 Run Google OR-Tools (Conflict-Free Solver)", type="primary", use_container_width=True):
-            with st.spinner("Generating optimal conflict-free timetable..."):
-                try:
-                    c_list, p_labels, v_periods, ortools_tt, reqs = prepare_engine_data()
-
-                    w_days = int(st.session_state.working_days)
-                    p_per_day = int(st.session_state.periods_per_day)
-                    is_half = st.session_state.saturday_half_day
-                    days_list = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][:w_days]
-                    num_days = len(days_list)
-
-                    day_periods_map = {}
-                    p_counter = 1
-                    for d in days_list:
-                        day_p_count = 4 if (d.lower() == "saturday" and is_half) else p_per_day
-                        day_periods_map[d] = list(range(p_counter, p_counter + day_p_count))
-                        p_counter += day_p_count
-
-                    model = cp_model.CpModel()
-
-                    x = {c: {p: {r_idx: model.NewBoolVar(f"a_{c}_{p}_{r_idx}")
-                                 for r_idx in range(len(reqs[c]))}
-                             for p in v_periods}
-                         for c in c_list}
-
-                    for c in c_list:
-                        for p in v_periods:
-                            model.AddExactlyOne([x[c][p][r_idx] for r_idx in range(len(reqs[c]))])
-                        for r_idx in range(len(reqs[c])):
-                            model.AddExactlyOne([x[c][p][r_idx] for p in v_periods])
-
-                    all_teachers = {req[0] for c in c_list for req in reqs[c] if req[0] != "-"}
-                    for p in v_periods:
-                        for teacher in all_teachers:
-                            t_assigns = [x[c][p][r_idx] for c in c_list for r_idx, req in enumerate(reqs[c]) if req[0] == teacher]
-                            if len(t_assigns) > 1:
-                                model.AddAtMostOne(t_assigns)
-
-                    for c in c_list:
-                        sub_to_indices = {}
-                        for r_idx, req in enumerate(reqs[c]):
-                            sub = req[1]
-                            if sub != "Free Period":
-                                sub_to_indices.setdefault(sub, []).append(r_idx)
-
-                        for sub, r_indices in sub_to_indices.items():
-                            total_sub_periods = len(r_indices)
-                            max_sub_per_day = max(1, (total_sub_periods + num_days - 1) // num_days)
-
-                            for d, d_periods in day_periods_map.items():
-                                day_sub_sum = sum(x[c][p][r_idx] for p in d_periods for r_idx in r_indices)
-                                model.Add(day_sub_sum <= max_sub_per_day)
-
-                                if is_core_subject(sub) and total_sub_periods >= num_days:
-                                    model.Add(day_sub_sum >= 1)
-
-                    for c in c_list:
-                        sub_to_indices = {}
-                        for r_idx, req in enumerate(reqs[c]):
-                            sub = req[1]
-                            if sub != "Free Period":
-                                sub_to_indices.setdefault(sub, []).append(r_idx)
-
-                        for d, d_periods in day_periods_map.items():
-                            for i in range(len(d_periods) - 1):
-                                p_curr = d_periods[i]
-                                p_next = d_periods[i + 1]
-                                for sub, r_indices in sub_to_indices.items():
-                                    model.Add(sum(x[c][p_curr][r] for r in r_indices) + sum(x[c][p_next][r] for r in r_indices) <= 1)
-
-                    for c in c_list:
-                        non_free_count = sum(1 for req in reqs[c] if req[0] != "-")
-                        free_r_indices = [r_idx for r_idx, req in enumerate(reqs[c]) if req[0] == "-"]
-                        if non_free_count >= num_days and free_r_indices:
-                            for d, d_periods in day_periods_map.items():
-                                p1 = d_periods[0]
-                                model.Add(sum(x[c][p1][r_idx] for r_idx in free_r_indices) == 0)
-
-                    for teacher in all_teachers:
-                        total_t_periods = sum(1 for c in c_list for req in reqs[c] if req[0] == teacher)
-                        t_daily_cap = max(5, (total_t_periods + num_days - 1) // num_days + 1)
-                        for d, d_periods in day_periods_map.items():
-                            t_daily_assigns = [
-                                x[c][p][r_idx]
-                                for c in c_list
-                                for p in d_periods
-                                for r_idx, req in enumerate(reqs[c])
-                                if req[0] == teacher
-                            ]
-                            if len(t_daily_assigns) > t_daily_cap:
-                                model.Add(sum(t_daily_assigns) <= t_daily_cap)
-
-                    obj_terms = []
-                    for c in c_list:
-                        for r_idx, req in enumerate(reqs[c]):
-                            sub = req[1]
-                            is_core = is_core_subject(sub)
-                            is_free = (req[0] == "-")
-                            for d, d_periods in day_periods_map.items():
-                                for slot_idx, p in enumerate(d_periods):
-                                    if is_core:
-                                        obj_terms.append(slot_idx * x[c][p][r_idx])
-                                    elif is_free:
-                                        obj_terms.append((len(d_periods) - slot_idx) * 6 * x[c][p][r_idx])
-                                    else:
-                                        obj_terms.append((len(d_periods) - slot_idx) * 2 * x[c][p][r_idx])
-                    if obj_terms:
-                        model.Minimize(sum(obj_terms))
-
-                    solver = cp_model.CpSolver()
-                    solver.parameters.max_time_in_seconds = 20.0
-                    status = solver.Solve(model)
-
-                    if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
-                        for c in c_list:
-                            for p in v_periods:
-                                for r_idx, req in enumerate(reqs[c]):
-                                    if solver.Value(x[c][p][r_idx]) == 1:
-                                        p_label_idx = -1
-                                        for idx, label in enumerate(p_labels):
-                                            if "LUNCH" not in label:
-                                                p_label_idx += 1
-                                                if p_label_idx == p - 1:
-                                                    ortools_tt[c][idx] = "Free Period" if req[0] == "-" else f"{req[1]} ({req[0]})"
-                                                    break
-                        df_res = pd.DataFrame(ortools_tt)
-                        df_res.insert(0, "Day / Period", p_labels)
-                        st.success(f"🔥 OR-Tools Success! (Status: {solver.StatusName(status)})")
-                        st.dataframe(df_res, use_container_width=True, hide_index=True)
+                if "classes" in data and data["classes"]:
+                  c_list = data["classes"]
+                  clean_classes = []
+                  for item in c_list:
+                    if isinstance(item, dict):
+                      clean_classes.append(
+                          str(
+                              item.get("Class Name")
+                              or item.get("name")
+                              or list(item.values())[0]
+                          )
+                      )
                     else:
-                        st.error("❌ Deadlock detected. Constraints satisfy nahi ho paye. Neeche AI-3 se check karwayein.")
-                except Exception as e:
-                    st.error(f"Engine Error: {e}")
+                      clean_classes.append(str(item))
+                  st.session_state.classes_df = pd.DataFrame(
+                      {"Class Name": clean_classes}
+                  )
 
-    st.markdown("---")
-    st.subheader("🤖 Step 3: AI-3 Deadlock Diagnostics & Rule Fixer")
-    ai3_input = st.text_area("AI-3 se baat karein ya 'Auto-Analyze' dabayein:", height=80)
-    col_a1, col_a2 = st.columns([7, 3])
-    with col_a1: submit_ai3 = st.button("Ask AI-3 & Update Rules 🛠️", use_container_width=True)
-    with col_a2: auto_btn = st.button("🚨 Auto-Analyze", use_container_width=True)
+                if "teachers" in data and data["teachers"]:
+                  normalized_teachers = []
+                  for t in data["teachers"]:
+                    if isinstance(t, dict):
+                      t_name = (
+                          t.get("Teacher Name")
+                          or t.get("teacher_name")
+                          or t.get("name")
+                          or t.get("teacher")
+                          or ""
+                      )
+                      subj = t.get("Subject") or t.get("subject") or ""
+                      allowed = (
+                          t.get("Allowed Classes")
+                          or t.get("allowed_classes")
+                          or t.get("allowed")
+                          or t.get("classes")
+                          or "all"
+                      )
+                      p_count = (
+                          t.get("Periods/Week (Per Class)")
+                          or t.get("periods_per_week")
+                          or t.get("periods")
+                          or 6
+                      )
+                      normalized_teachers.append({
+                          "Teacher Name": str(t_name).strip(),
+                          "Subject": str(subj).strip(),
+                          "Allowed Classes": str(allowed).strip(),
+                          "Periods/Week (Per Class)": int(p_count),
+                      })
+                  st.session_state.teachers_df = pd.DataFrame(
+                      normalized_teachers
+                  )
 
-    target_prompt = None
-    if auto_btn:
-        target_prompt = "Google OR-Tools fail ho raha hai. Mere live data aur rules ko check karke galti batao."
-    elif submit_ai3 and ai3_input:
-        target_prompt = ai3_input
+                if "fixed_rules" in data and data["fixed_rules"]:
+                  st.session_state.rules_df = pd.DataFrame(
+                      {"Rule": [str(r) for r in data["fixed_rules"]]}
+                  )
 
-    if target_prompt:
-        if not nvidia_api_key:
-            st.error("❌ Key Missing in Sidebar!")
-        else:
-            with st.spinner("AI-3 Analyzing..."):
-                try:
-                    c_list, p_labels, v_periods, _, _ = prepare_engine_data()
-                    live_info = json.dumps({
-                        "classes": c_list,
-                        "teachers": st.session_state.teachers_df.to_dict("records"),
-                        "rules": st.session_state.rules_df["Rule"].tolist()
-                    })
-                    sys_p = f"You are AI-3 Timetable Diagnostics. DATA:\n{live_info}\nHelp user troubleshoot. If updating rules, output JSON at the end: ```json\n{{\"updated_rules\": [\"Rule 1\"]}}\n```"
-                    reply = call_nvidia([{"role": "system", "content": sys_p}, {"role": "user", "content": target_prompt}], temp=0.2, max_tokens=2500)
-                    st.markdown(re.sub(r'```json\s*\{.*?\}\s*```', '', reply, flags=re.DOTALL))
-                    m = re.search(r'```json\s*(\{.*?\})\s*```', reply, re.DOTALL)
-                    if m:
-                        r_data = json.loads(m.group(1))
-                        if "updated_rules" in r_data:
-                            st.session_state.rules_df = pd.DataFrame({"Rule": r_data["updated_rules"]})
-                            st.success("✅ AI-3 ne Rules Tab update kar diya hai!")
-                            time.sleep(2)
-                            st.rerun()
-                except Exception as e:
-                    st.error(f"AI 3 Error: {e}")
+                st.session_state.manual_grids = {}
+                st.session_state.sync_id += 1
+
+                st.success("🎉 BINGO! Tabs Successfully Update Ho Gaye!")
+                time.sleep(1)
+                st.rerun()
+              else:
+                st.error(
+                    "❌ AI 2 output parse nahi ho paya. Kripya chat box mein"
+                    " data check karein."
+                )
+            except Exception as e:
+              st.error(f"Sync Error: {e}")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    if st.button(
+        "🔥 Run Google OR-Tools (Conflict-Free Solver)",
+        type="primary",
+        use_container_width=True,
+    ):
+      with st.spinner("Generating optimal conflict-free timetable..."):
+        try:
+          c_list, p_labels, v_periods, ortools_tt, reqs = prepare_engine_data()
+
+          w_days = int(st.session_state.working_days)
+          p_per_day = int(st.session_state.periods_per_day)
+          is_half = st.session_state.saturday_half_day
+          days_list = [
+              "Monday",
+              "Tuesday",
+              "Wednesday",
+              "Thursday",
+              "Friday",
+              "Saturday",
+          ][:w_days]
+          num_days = len(days_list)
+
+          day_periods_map = {}
+          p_counter = 1
+          for d in days_list:
+            day_p_count = (
+                4 if (d.lower() == "saturday" and is_half) else p_per_day
+            )
+            day_periods_map[d] = list(range(p_counter, p_counter + day_p_count))
+            p_counter += day_p_count
+
+          model = cp_model.CpModel()
+
+          x = {
+              c: {
+                  p: {
+                      r_idx: model.NewBoolVar(f"a_{c}_{p}_{r_idx}")
+                      for r_idx in range(len(reqs[c]))
+                  }
+                  for p in v_periods
+              }
+              for c in c_list
+          }
+
+          for c in c_list:
+            for p in v_periods:
+              model.AddExactlyOne(
+                  [x[c][p][r_idx] for r_idx in range(len(reqs[c]))]
+              )
+            for r_idx in range(len(reqs[c])):
+              model.AddExactlyOne([x[c][p][r_idx] for p in v_periods])
+
+          all_teachers = {
+              req[0] for c in c_list for req in reqs[c] if req[0] != "-"
+          }
+          for p in v_periods:
+            for teacher in all_teachers:
+              t_assigns = [
+                  x[c][p][r_idx]
+                  for c in c_list
+                  for r_idx, req in enumerate(reqs[c])
+                  if req[0] == teacher
+              ]
+              if len(t_assigns) > 1:
+                model.AddAtMostOne(t_assigns)
+
+          for c in c_list:
+            sub_to_indices = {}
+            for r_idx, req in enumerate(reqs[c]):
+              sub = req[1]
+              if sub != "Free Period":
+                sub_to_indices.setdefault(sub, []).append(r_idx)
+
+            for sub, r_indices in sub_to_indices.items():
+              total_sub_periods = len(r_indices)
+              max_sub_per_day = max(
+                  1, (total_sub_periods + num_days - 1) // num_days
+              )
+
+              for d, d_periods in day_periods_map.items():
+                day_sub_sum = sum(
+                    x[c][p][r_idx] for p in d_periods for r_idx in r_indices
+                )
+                model.Add(day_sub_sum <= max_sub_per_day)
+
+                if is_core_subject(sub) and total_sub_periods >= num_days:
+                  model.Add(day_sub_sum >= 1)
+
+          for c in c_list:
+            sub_to_indices = {}
+            for r_idx, req in enumerate(reqs[c]):
+              sub = req[1]
+              if sub != "Free Period":
+                sub_to_indices.setdefault(sub, []).append(r_idx)
+
+            for d, d_periods in day_periods_map.items():
+              for i in range(len(d_periods) - 1):
+                p_curr = d_periods[i]
+                p_next = d_periods[i + 1]
+                for sub, r_indices in sub_to_indices.items():
+                  model.Add(
+                      sum(x[c][p_curr][r] for r in r_indices)
+                      + sum(x[c][p_next][r] for r in r_indices)
+                      <= 1
+                  )
+
+          for c in c_list:
+            non_free_count = sum(1 for req in reqs[c] if req[0] != "-")
+            free_r_indices = [
+                r_idx for r_idx, req in enumerate(reqs[c]) if req[0] == "-"
+            ]
+            if non_free_count >= num_days and free_r_indices:
+              for d, d_periods in day_periods_map.items():
+                p1 = d_periods[0]
+                model.Add(sum(x[c][p1][r_idx] for r_idx in free_r_indices) == 0)
+
+          for teacher in all_teachers:
+            total_t_periods = sum(
+                1 for c in c_list for req in reqs[c] if req[0] == teacher
+            )
+            t_daily_cap = max(
+                5, (total_t_periods + num_days - 1) // num_days + 1
+            )
+            for d, d_periods in day_periods_map.items():
+              t_daily_assigns = [
+                  x[c][p][r_idx]
+                  for c in c_list
+                  for p in d_periods
+                  for r_idx, req in enumerate(reqs[c])
+                  if req[0] == teacher
+              ]
+              if len(t_daily_assigns) > t_daily_cap:
+                model.Add(sum(t_daily_assigns) <= t_daily_cap)
+
+          obj_terms = []
+          for c in c_list:
+            for r_idx, req in enumerate(reqs[c]):
+              sub = req[1]
+              is_core = is_core_subject(sub)
+              is_free = req[0] == "-"
+              for d, d_periods in day_periods_map.items():
+                for slot_idx, p in enumerate(d_periods):
+                  if is_core:
+                    obj_terms.append(slot_idx * x[c][p][r_idx])
+                  elif is_free:
+                    obj_terms.append(
+                        (len(d_periods) - slot_idx) * 6 * x[c][p][r_idx]
+                    )
+                  else:
+                    obj_terms.append(
+                        (len(d_periods) - slot_idx) * 2 * x[c][p][r_idx]
+                    )
+          if obj_terms:
+            model.Minimize(sum(obj_terms))
+
+          solver = cp_model.CpSolver()
+          solver.parameters.max_time_in_seconds = 20.0
+          status = solver.Solve(model)
+
+          if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
+            for c in c_list:
+              for p in v_periods:
+                for r_idx, req in enumerate(reqs[c]):
+                  if solver.Value(x[c][p][r_idx]) == 1:
+                    p_label_idx = -1
+                    for idx, label in enumerate(p_labels):
+                      if "LUNCH" not in label:
+                        p_label_idx += 1
+                        if p_label_idx == p - 1:
+                          ortools_tt[c][idx] = (
+                              "Free Period"
+                              if req[0] == "-"
+                              else f"{req[1]} ({req[0]})"
+                          )
+                          break
+            df_res = pd.DataFrame(ortools_tt)
+            df_res.insert(0, "Day / Period", p_labels)
+            st.success(f"🔥 OR-Tools Success! (Status: {solver.StatusName(status)})")
+            st.dataframe(df_res, use_container_width=True, hide_index=True)
+          else:
+            st.error(
+                "❌ Deadlock detected. Constraints satisfy nahi ho paye. Neeche"
+                " AI-3 se check karwayein."
+            )
+        except Exception as e:
+          st.error(f"Engine Error: {e}")
+
+  st.markdown("---")
+  st.subheader("🤖 Step 3: AI-3 Deadlock Diagnostics & Rule Fixer")
+  ai3_input = st.text_area(
+      "AI-3 se baat karein ya 'Auto-Analyze' dabayein:", height=80
+  )
+  col_a1, col_a2 = st.columns([7, 3])
+  with col_a1:
+    submit_ai3 = st.button("Ask AI-3 & Update Rules 🛠️", use_container_width=True)
+  with col_a2:
+    auto_btn = st.button("🚨 Auto-Analyze", use_container_width=True)
+
+  target_prompt = None
+  if auto_btn:
+    target_prompt = (
+        "Google OR-Tools fail ho raha hai. Mere live data aur rules ko check"
+        " karke galti batao."
+    )
+  elif submit_ai3 and ai3_input:
+    target_prompt = ai3_input
+
+  if target_prompt:
+    if not nvidia_api_key:
+      st.error("❌ Key Missing in Sidebar!")
+    else:
+      with st.spinner("AI-3 Analyzing..."):
+        try:
+          c_list, p_labels, v_periods, _, _ = prepare_engine_data()
+          live_info = json.dumps({
+              "classes": c_list,
+              "teachers": st.session_state.teachers_df.to_dict("records"),
+              "rules": st.session_state.rules_df["Rule"].tolist(),
+          })
+          sys_p = (
+              f"You are AI-3 Timetable Diagnostics. DATA:\n{live_info}\nHelp"
+              " user troubleshoot. If updating rules, output JSON at the end:"
+              ' ```json\n{"updated_rules": ["Rule 1"]}\n```'
+          )
+          reply = call_nvidia(
+              [
+                  {"role": "system", "content": sys_p},
+                  {"role": "user", "content": target_prompt},
+              ],
+              temp=0.2,
+              max_tokens=2500,
+          )
+          st.markdown(
+              re.sub(r"```json\s*\{.*?\}\s*```", "", reply, flags=re.DOTALL)
+          )
+          m = re.search(r"```json\s*(\{.*?\})\s*```", reply, re.DOTALL)
+          if m:
+            r_data = json.loads(m.group(1))
+            if "updated_rules" in r_data:
+              st.session_state.rules_df = pd.DataFrame(
+                  {"Rule": r_data["updated_rules"]}
+              )
+              st.success("✅ AI-3 ne Rules Tab update kar diya hai!")
+              time.sleep(2)
+              st.rerun()
+        except Exception as e:
+          st.error(f"AI 3 Error: {e}")
 
 # ================= TAB 6: NEW DEDICATED DAY-BY-DAY CUSTOM STUDIO =================
 with tab_custom:
-    st.header("📅 Class-Specific Interactive Timetable Studio")
-    st.markdown("Yahan dropdown mein **sirf wahi teachers dikhenge jo us class/section ko padhate hain**.")
+  st.header("📅 Class-Specific Interactive Timetable Studio")
+  st.markdown(
+      "Yahan dropdown mein **sirf wahi teachers dikhenge jo us class/section"
+      " ko padhate hain**."
+  )
 
-    col_d1, col_d2 = st.columns([4, 6])
-    with col_d1:
-        working_days_list = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][:int(st.session_state.working_days)]
-        selected_day = st.selectbox("📅 1. Select Day to Edit:", working_days_list)
+  col_d1, col_d2 = st.columns([4, 6])
+  with col_d1:
+    working_days_list = [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ][: int(st.session_state.working_days)]
+    selected_day = st.selectbox("📅 1. Select Day to Edit:", working_days_list)
 
-    classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
-    teachers_list = st.session_state.teachers_df.to_dict("records")
-    p_count = int(st.session_state.periods_per_day)
-    break_p = int(st.session_state.break_at)
-    periods = [f"P{i}" for i in range(1, p_count + 1)]
+  classes_list = st.session_state.classes_df["Class Name"].dropna().tolist()
+  teachers_list = st.session_state.teachers_df.to_dict("records")
+  p_count = int(st.session_state.periods_per_day)
+  break_p = int(st.session_state.break_at)
+  periods = [f"P{i}" for i in range(1, p_count + 1)]
 
-    if selected_day not in st.session_state.manual_grids:
-        initial_rows = []
+  if selected_day not in st.session_state.manual_grids:
+    initial_rows = []
+    for c in classes_list:
+      row = {"Class / Section": c}
+      for idx, p in enumerate(periods, 1):
+        row[p] = "☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)"
+      initial_rows.append(row)
+    st.session_state.manual_grids[selected_day] = pd.DataFrame(initial_rows)
+
+  current_day_df = st.session_state.manual_grids[selected_day]
+
+  with col_d2:
+    st.markdown("<br>", unsafe_allow_html=True)
+    c_act1, c_act2 = st.columns(2)
+    with c_act1:
+      if st.button(
+          f"⚡ Auto-Fill {selected_day} (OR-Tools)", use_container_width=True
+      ):
+        new_rows = []
         for c in classes_list:
-            row = {"Class / Section": c}
-            for idx, p in enumerate(periods, 1):
-                row[p] = "☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)"
-            initial_rows.append(row)
-        st.session_state.manual_grids[selected_day] = pd.DataFrame(initial_rows)
+          eligible_t = [
+              t
+              for t in teachers_list
+              if c
+              in parse_allowed_classes(
+                  t.get("Allowed Classes", ""), classes_list
+              )
+              and str(t.get("Teacher Name", "")).strip()
+          ]
+          row = {"Class / Section": c}
+          for idx, p in enumerate(periods, 1):
+            if idx == break_p:
+              row[p] = "☕ LUNCH / BREAK"
+            elif eligible_t:
+              t_choice = eligible_t[(idx - 1) % len(eligible_t)]
+              row[p] = (
+                  f"{t_choice.get('Subject')} ({t_choice.get('Teacher Name')})"
+              )
+            else:
+              row[p] = "- (Free Period)"
+          new_rows.append(row)
+        st.session_state.manual_grids[selected_day] = pd.DataFrame(new_rows)
+        st.rerun()
 
-    current_day_df = st.session_state.manual_grids[selected_day]
-
-    with col_d2:
-        st.markdown("<br>", unsafe_allow_html=True)
-        c_act1, c_act2 = st.columns(2)
-        with c_act1:
-            if st.button(f"⚡ Auto-Fill {selected_day} (OR-Tools)", use_container_width=True):
-                new_rows = []
-                for c in classes_list:
-                    eligible_t = [t for t in teachers_list if c in parse_allowed_classes(t.get("Allowed Classes", ""), classes_list) and str(t.get("Teacher Name", "")).strip()]
-                    row = {"Class / Section": c}
-                    for idx, p in enumerate(periods, 1):
-                        if idx == break_p:
-                            row[p] = "☕ LUNCH / BREAK"
-                        elif eligible_t:
-                            t_choice = eligible_t[(idx - 1) % len(eligible_t)]
-                            row[p] = f"{t_choice.get('Subject')} ({t_choice.get('Teacher Name')})"
-                        else:
-                            row[p] = "- (Free Period)"
-                    new_rows.append(row)
-                st.session_state.manual_grids[selected_day] = pd.DataFrame(new_rows)
-                st.rerun()
-
-        with c_act2:
-            if st.button(f"🗑️ Clear {selected_day}", use_container_width=True):
-                new_rows = []
-                for c in classes_list:
-                    row = {"Class / Section": c}
-                    for idx, p in enumerate(periods, 1):
-                        row[p] = "☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)"
-                    new_rows.append(row)
-                st.session_state.manual_grids[selected_day] = pd.DataFrame(new_rows)
-                st.rerun()
-
-    st.markdown("---")
-
-    st.subheader("🎯 2. Class / Section Customize Karein")
-    selected_class = st.selectbox(
-        "Class / Section Chunein:",
-        classes_list,
-        help="Is class ke dropdown mein kewal wahi teachers aayenge jo ise padhane ke liye allowed hain."
-    )
-
-    class_eligible_options = ["- (Free Period)", "☕ LUNCH / BREAK"]
-    for t in teachers_list:
-        t_name = str(t.get("Teacher Name", "")).strip()
-        sub = str(t.get("Subject", "")).strip()
-        allowed = parse_allowed_classes(t.get("Allowed Classes", ""), classes_list)
-        if selected_class in allowed and t_name and sub:
-            opt = f"{sub} ({t_name})"
-            if opt not in class_eligible_options:
-                class_eligible_options.append(opt)
-
-    st.caption(
-        f"👉 **{selected_class}** ke eligible teachers: " +
-        (", ".join([opt for opt in class_eligible_options if opt not in ["- (Free Period)", "☕ LUNCH / BREAK"]]) or "⚠️ Koi teacher assigned nahi mila")
-    )
-
-    class_mask = (current_day_df["Class / Section"] == selected_class)
-    if class_mask.any():
-        class_row_df = current_day_df[class_mask].copy()
-    else:
-        class_row_dict = {"Class / Section": selected_class, **{p: ("☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)") for idx, p in enumerate(periods, 1)}}
-        class_row_df = pd.DataFrame([class_row_dict])
-
-    class_col_config = {"Class / Section": st.column_config.TextColumn("Class / Section", disabled=True)}
-    for p in periods:
-        class_col_config[p] = st.column_config.SelectboxColumn(
-            p,
-            help=f"{selected_class} ke allowed teachers mein se select karein",
-            width="medium",
-            options=class_eligible_options,
-            required=True
-        )
-
-    edited_class_df = st.data_editor(
-        class_row_df,
-        column_config=class_col_config,
-        use_container_width=True,
-        hide_index=True,
-        key=f"editor_{selected_day}_{selected_class}_{st.session_state.sync_id}"
-    )
-
-    for idx, row in edited_class_df.iterrows():
-        for p in periods:
-            current_day_df.loc[current_day_df["Class / Section"] == selected_class, p] = row[p]
-    st.session_state.manual_grids[selected_day] = current_day_df
-
-    st.markdown("---")
-    st.subheader(f"📊 {selected_day} Master Timetable (All Classes)")
-    st.dataframe(current_day_df, use_container_width=True, hide_index=True)
-
-    clashes_found = []
-    for p in periods:
-        period_teachers = {}
-        for _, row in current_day_df.iterrows():
-            cls_name = row["Class / Section"]
-            val = str(row.get(p, ""))
-            if val and val != "- (Free Period)" and val != "☕ LUNCH / BREAK" and "(" in val:
-                t_match = re.search(r'\((.*?)\)', val)
-                if t_match:
-                    t_name = t_match.group(1).strip()
-                    if t_name in period_teachers:
-                        clashes_found.append(f"🚨 **Clash in {p}**: Teacher **{t_name}** is selected in both **{period_teachers[t_name]}** and **{cls_name}** simultaneously!")
-                    else:
-                        period_teachers[t_name] = cls_name
-
-    if clashes_found:
-        for cl in clashes_found:
-            st.error(cl)
-    else:
-        st.success(f"✅ **0 Clashes in {selected_day}**: Kisi bhi period mein koi teacher double-booked nahi hai. Schedule bilkul valid hai!")
-
-    st.markdown("---")
-    st.subheader("📥 Export Complete Week")
-    if st.button("Generate Full Weekly Summary & Download CSV"):
-        all_days = []
-        for d in working_days_list:
-            if d in st.session_state.manual_grids:
-                d_df = st.session_state.manual_grids[d].copy()
-                d_df.insert(0, "Day", d)
-                all_days.append(d_df)
-        if all_days:
-            master_week_df = pd.concat(all_days)
-            st.dataframe(master_week_df, use_container_width=True, hide_index=True)
-            st.download_button(
-                label="📥 Download All Days (CSV)",
-                data=master_week_df.to_csv(index=False).encode('utf-8'),
-                file_name="weekly_timetable.csv",
-                mime="text/csv"
+    with c_act2:
+      if st.button(f"🗑️ Clear {selected_day}", use_container_width=True):
+        new_rows = []
+        for c in classes_list:
+          row = {"Class / Section": c}
+          for idx, p in enumerate(periods, 1):
+            row[p] = (
+                "☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)"
             )
+          new_rows.append(row)
+        st.session_state.manual_grids[selected_day] = pd.DataFrame(new_rows)
+        st.rerun()
 
+  st.markdown("---")
+
+  st.subheader("🎯 2. Class / Section Customize Karein")
+  selected_class = st.selectbox(
+      "Class / Section Chunein:",
+      classes_list,
+      help=(
+          "Is class ke dropdown mein kewal wahi teachers aayenge jo ise padhane"
+          " ke liye allowed hain."
+      ),
+  )
+
+  class_mask = current_day_df["Class / Section"] == selected_class
+  if class_mask.any():
+    class_row_df = current_day_df[class_mask].copy()
+  else:
+    class_row_dict = {
+        "Class / Section": selected_class,
+        **{
+            p: ("☕ LUNCH / BREAK" if idx == break_p else "- (Free Period)")
+            for idx, p in enumerate(periods, 1)
+        },
+    }
+    class_row_df = pd.DataFrame([class_row_dict])
+
+  # DYNAMIC FILTER: Har period me busy teachers automatically dropdown se gayab honge!
+  class_col_config = {
+      "Class / Section": st.column_config.TextColumn(
+          "Class / Section", disabled=True
+      )
+  }
+  for p in periods:
+    # 1. Check karein ki is period p me dusri classes me kaun se teachers busy hain
+    busy_teachers_in_p = set()
+    for _, r in current_day_df.iterrows():
+      if str(r.get("Class / Section")) != selected_class:
+        val = str(r.get(p, ""))
+        if (
+            val
+            and val != "- (Free Period)"
+            and val != "☕ LUNCH / BREAK"
+            and "(" in val
+        ):
+          m = re.search(r"\((.*?)\)", val)
+          if m:
+            t_name = m.group(1).strip()
+            if t_name not in ["Free Period", "N/A"]:
+              busy_teachers_in_p.add(t_name)
+
+    # 2. Options: Sirf wahi teachers jo is class ko padhate hain AUR is period p me busy NAHI hain
+    p_options = ["- (Free Period)", "☕ LUNCH / BREAK"]
+    for t in teachers_list:
+      t_name = str(t.get("Teacher Name", "")).strip()
+      sub = str(t.get("Subject", "")).strip()
+      allowed = parse_allowed_classes(
+          t.get("Allowed Classes", ""), classes_list
+      )
+      if selected_class in allowed and t_name and sub:
+        if t_name not in busy_teachers_in_p:
+          opt = f"{sub} ({t_name})"
+          if opt not in p_options:
+            p_options.append(opt)
+
+    current_val = (
+        str(class_row_df.iloc[0].get(p, "")) if not class_row_df.empty else ""
+    )
+    if current_val and current_val not in p_options:
+      p_options.append(current_val)
+
+    class_col_config[p] = st.column_config.SelectboxColumn(
+        p,
+        help=f"{p} ke available teachers (busy teachers automatically hidden)",
+        width="medium",
+        options=p_options,
+        required=True,
+    )
+
+  edited_class_df = st.data_editor(
+      class_row_df,
+      column_config=class_col_config,
+      use_container_width=True,
+      hide_index=True,
+      key=f"editor_{selected_day}_{selected_class}_{st.session_state.sync_id}",
+  )
+
+  for idx, row in edited_class_df.iterrows():
+    for p in periods:
+      current_day_df.loc[
+          current_day_df["Class / Section"] == selected_class, p
+      ] = row[p]
+  st.session_state.manual_grids[selected_day] = current_day_df
+
+  st.markdown("---")
+  st.subheader(f"📊 {selected_day} Master Timetable (All Classes)")
+  st.dataframe(current_day_df, use_container_width=True, hide_index=True)
+
+  clashes_found = []
+  for p in periods:
+    period_teachers = {}
+    for _, row in current_day_df.iterrows():
+      cls_name = row["Class / Section"]
+      val = str(row.get(p, ""))
+      if (
+          val
+          and val != "- (Free Period)"
+          and val != "☕ LUNCH / BREAK"
+          and "(" in val
+      ):
+        t_match = re.search(r"\((.*?)\)", val)
+        if t_match:
+          t_name = t_match.group(1).strip()
+          if t_name in period_teachers:
+            clashes_found.append(
+                f"🚨 **Clash in {p}**: Teacher **{t_name}** is selected in both"
+                f" **{period_teachers[t_name]}** and **{cls_name}**"
+                " simultaneously!"
+            )
+          else:
+            period_teachers[t_name] = cls_name
+
+  if clashes_found:
+    for cl in clashes_found:
+      st.error(cl)
+  else:
+    st.success(
+        f"✅ **0 Clashes in {selected_day}**: Kisi bhi period mein koi teacher"
+        " double-booked nahi hai. Schedule bilkul valid hai!"
+    )
+
+  st.markdown("---")
+  st.subheader("📥 Export Complete Week")
+  if st.button("Generate Full Weekly Summary & Download CSV"):
+    all_days = []
+    for d in working_days_list:
+      if d in st.session_state.manual_grids:
+        d_df = st.session_state.manual_grids[d].copy()
+        d_df.insert(0, "Day", d)
+        all_days.append(d_df)
+    if all_days:
+      master_week_df = pd.concat(all_days)
+      st.dataframe(master_week_df, use_container_width=True, hide_index=True)
+      st.download_button(
+          label="📥 Download All Days (CSV)",
+          data=master_week_df.to_csv(index=False).encode("utf-8"),
+          file_name="weekly_timetable.csv",
+          mime="text/csv",
+      )
