@@ -3,7 +3,7 @@ import pandas as pd
 import io
 from ortools.sat.python import cp_model
 
-st.set_page_config(page_title="School Timetable Pro (Deterministic)", layout="wide")
+st.set_page_config(page_title="School Timetable Pro (Deterministic & Conflict-Free)", layout="wide", page_icon="🏫")
 
 # ================= STATE INITIALIZATION =================
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -33,17 +33,17 @@ if "generated_schedule" not in st.session_state:
 
 # ================= HELPER FUNCTIONS =================
 def normalize_allotment_df(df):
-    """Excel / CSV के कॉलम्स को स्टैंडर्ड फॉर्मेट में मैप करता है"""
+    """Excel / CSV कॉलम्स को पहचानकर स्टैंडर्ड स्कीमा में बदलता है और गलत डेटा साफ करता है"""
     col_map = {}
     for col in df.columns:
-        c_clean = str(col).strip().lower().replace(" ", "").replace("_", "")
-        if c_clean in ["class", "grade", "section", "classsection"]:
+        c_clean = str(col).strip().lower().replace(" ", "").replace("_", "").replace("/", "")
+        if any(k in c_clean for k in ["class", "grade", "section"]):
             col_map[col] = "Class"
-        elif c_clean in ["subject", "sub", "subjectname"]:
+        elif any(k in c_clean for k in ["subject", "sub"]):
             col_map[col] = "Subject"
-        elif c_clean in ["teacher", "teachername", "faculty", "facultyname"]:
+        elif any(k in c_clean for k in ["teacher", "faculty", "staff", "instructor"]):
             col_map[col] = "Teacher"
-        elif c_clean in ["periods/week", "periodsperweek", "periods", "count", "weeklyperiods", "quota"]:
+        elif any(k in c_clean for k in ["period", "count", "quota", "slot"]):
             col_map[col] = "Periods/Week"
     
     df = df.rename(columns=col_map)
@@ -52,16 +52,68 @@ def normalize_allotment_df(df):
         if req not in df.columns:
             if req == "Periods/Week": df[req] = 4
             else: df[req] = ""
+            
+    # सख्त स्पेस ट्रिमिंग और खाली/गलत स्ट्रिंग्स को हटाना
+    for c in ["Class", "Subject", "Teacher"]:
+        df[c] = df[c].astype(str).str.strip()
     
-    df = df[required].dropna(subset=["Class", "Subject", "Teacher"])
-    df["Class"] = df["Class"].astype(str).str.strip()
-    df["Subject"] = df["Subject"].astype(str).str.strip()
-    df["Teacher"] = df["Teacher"].astype(str).str.strip()
-    df["Periods/Week"] = pd.to_numeric(df["Periods/Week"], errors="coerce").fillna(4).astype(int)
-    return df
+    df = df[~df["Class"].str.lower().isin(["", "nan", "none"])]
+    df = df[~df["Subject"].str.lower().isin(["", "nan", "none"])]
+    df = df[~df["Teacher"].str.lower().isin(["", "nan", "none"])]
+    
+    # पीरियड्स को पॉजिटिव इंटीजर (न्यूनतम 1) पर सेट करना
+    df["Periods/Week"] = pd.to_numeric(df["Periods/Week"], errors="coerce").fillna(4).astype(int).clip(lower=1)
+    return df[required].reset_index(drop=True)
+
+def pre_check_allotments(df_allot, classes, slots_per_class):
+    """सॉल्वर चलाने से पहले डेटा की प्री-चेक वैलिडेशन करता है"""
+    issues = []
+    warnings = []
+    
+    # 1. क्लास-वाइज कैपेसिटी चेक
+    for c in classes:
+        sub_df = df_allot[df_allot["Class"] == c]
+        total_req = sub_df["Periods/Week"].sum()
+        if total_req > slots_per_class:
+            issues.append(f"Class '{c}': कुल माँगे गए {total_req} पीरियड, जबकि उपलब्ध केवल {slots_per_class} स्लॉट्स हैं।")
+    
+    # 2. टीचर-वाइज वर्कलोड ओवरलोड चेक
+    teacher_totals = df_allot[df_allot["Teacher"] != "Supervised Activity"].groupby("Teacher")["Periods/Week"].sum()
+    for t, total_periods in teacher_totals.items():
+        if total_periods > slots_per_class:
+            issues.append(f"Teacher '{t}': कुल {total_periods} पीरियड असाइन हुए हैं, जो हफ़्ते की अधिकतम सीमा ({slots_per_class} स्लॉट्स) से ज़्यादा हैं।")
+        elif total_periods >= int(slots_per_class * 0.9):
+            warnings.append(f"Teacher '{t}': {total_periods}/{slots_per_class} स्लॉट्स (अत्यधिक लोड - {round(total_periods/slots_per_class*100)}%)")
+            
+    return issues, warnings
+
+def generate_master_excel(sch):
+    """पूरे टाइमटेबल का मल्टी-शीट मास्टर एक्सेल वर्कबुक बनाता है"""
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine='openpyxl') as writer:
+        # Sheet 1: All Classes Master Grid
+        all_classes_data = []
+        for c in sch["classes"]:
+            for d in sch["days"]:
+                row = {"Class": c, "Day": d}
+                for p in sch["periods"]:
+                    subj, teacher = sch["schedule"].get((c, d, p), ("-", "-"))
+                    row[f"Period {p}"] = "LUNCH" if subj.startswith("☕") else f"{subj} ({teacher})"
+                all_classes_data.append(row)
+        pd.DataFrame(all_classes_data).to_excel(writer, sheet_name="Master Schedule", index=False)
+        
+        # Sheet 2: Teacher Workload Summary
+        workload = []
+        for t in sorted(sch["teachers"]):
+            cnt = sum(1 for (c, d, p), (subj, t_assigned) in sch["schedule"].items() if t_assigned == t)
+            workload.append({"Teacher Name": t, "Weekly Periods": cnt, "Daily Avg": round(cnt / len(sch["days"]), 2)})
+        pd.DataFrame(workload).to_excel(writer, sheet_name="Teacher Workload", index=False)
+
+    buf.seek(0)
+    return buf.getvalue()
 
 # ================= OR-TOOLS SOLVER ENGINE =================
-def solve_school_timetable():
+def solve_school_timetable(time_limit=15.0):
     w_days = int(st.session_state.working_days)
     p_per_day = int(st.session_state.periods_per_day)
     break_at = int(st.session_state.break_at)
@@ -72,6 +124,15 @@ def solve_school_timetable():
     all_periods = list(range(1, p_per_day + 1))
     teaching_periods = [p for p in all_periods if p != break_at]
     slots_per_class = len(days) * len(teaching_periods)
+
+    # 1. Pre-validation checks
+    issues, _ = pre_check_allotments(df_allot, classes, slots_per_class)
+    if issues:
+        return {
+            "status": "failed",
+            "solver_status": "INPUT_VALIDATION_ERROR",
+            "message": " | ".join(issues)
+        }
 
     allotments_by_class = {}
     for c in classes:
@@ -141,7 +202,7 @@ def solve_school_timetable():
                     model.Add(x[(c, d, p1, i)] + x[(c, d, p2, i)] <= 1)
 
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = 8.0
+    solver.parameters.max_time_in_seconds = time_limit
     solver.parameters.num_search_workers = 4
     status = solver.Solve(model)
 
@@ -172,12 +233,12 @@ def solve_school_timetable():
         return {
             "status": "failed",
             "solver_status": solver.StatusName(status),
-            "message": "Constraints infeasible hain. Check karein ki kisi teacher ke total periods available slots se zyada to nahi hain."
+            "message": "गणितीय रूप से यह कंस्ट्रेंट पूरा नहीं हो सकता। कृपया चेक करें कि किसी शिक्षक के पीरियड्स का योग बहुत अधिक तो नहीं है।"
         }
 
 # ================= USER INTERFACE =================
-st.title("🏫 School Timetable Pro (Deterministic)")
-st.caption("100% Conflict-Free Scheduling powered by Google OR-Tools CP-SAT.")
+st.title("🏫 School Timetable Pro (Deterministic & Conflict-Free)")
+st.caption("Google OR-Tools CP-SAT संचालित 100% सटीक, क्लैश-फ्री स्कूल टाइमटेबल जनरेटर")
 
 tab_setup, tab_class_view, tab_teacher_view, tab_audit = st.tabs([
     "⚙️ 1. Setup & Allotments", 
@@ -186,27 +247,32 @@ tab_setup, tab_class_view, tab_teacher_view, tab_audit = st.tabs([
     "🔍 4. Conflict & Load Audit"
 ])
 
-with tab_setup:
-    st.subheader("1. Bell Schedule & Class Setup")
-    col_s1, col_s2, col_s3 = st.columns(3)
-    with col_s1: st.session_state.working_days = st.number_input("Working Days", 1, 7, int(st.session_state.working_days))
-    with col_s2: st.session_state.periods_per_day = st.number_input("Periods per Day", 1, 15, int(st.session_state.periods_per_day))
-    with col_s3: st.session_state.break_at = st.number_input("Lunch Break AFTER Period", 1, 15, int(st.session_state.break_at))
+w_days = int(st.session_state.working_days)
+p_per_day = int(st.session_state.periods_per_day)
+b_at = int(st.session_state.break_at)
+slots_per_class = w_days * (p_per_day - 1 if b_at <= p_per_day else p_per_day)
 
-    classes_input = st.text_input("Classes (comma-separated):", value=", ".join(st.session_state.classes_list))
+with tab_setup:
+    st.subheader("1. Bell Schedule & Classes")
+    col_s1, col_s2, col_s3 = st.columns(3)
+    with col_s1: st.session_state.working_days = st.number_input("Working Days (सप्ताह में दिन)", 1, 7, int(st.session_state.working_days))
+    with col_s2: st.session_state.periods_per_day = st.number_input("Periods per Day (कुल पीरियड)", 1, 15, int(st.session_state.periods_per_day))
+    with col_s3: st.session_state.break_at = st.number_input("Lunch Break AFTER Period (लंच पीरियड)", 1, 15, int(st.session_state.break_at))
+
+    classes_input = st.text_input("Classes List (अल्पविराम से अलग करें):", value=", ".join(st.session_state.classes_list))
     st.session_state.classes_list = [c.strip() for c in classes_input.split(",") if c.strip()]
 
     st.markdown("---")
-    st.subheader("2. Faculty & Subject Allotment Matrix")
+    st.subheader("2. Faculty & Subject Allotments")
 
-    # Excel / CSV File Upload & Sample Template Section
+    # Excel / CSV Bulk Upload & Template Box
     with st.expander("📥 Bulk Upload from Excel / CSV (या Sample Template Download करें)", expanded=True):
         col_up1, col_up2 = st.columns([3, 1])
         with col_up1:
             uploaded_file = st.file_uploader(
-                "Teacher & Subject Allotment File Upload Karein (.xlsx, .xls, .csv):",
+                "Teacher & Subject Allotment File Upload (.xlsx, .xls, .csv):",
                 type=["xlsx", "xls", "csv"],
-                help="File mein columns hone chahiye: Class, Subject, Teacher, Periods/Week"
+                help="Columns: Class, Subject, Teacher, Periods/Week"
             )
         with col_up2:
             st.write("**Sample Template:**")
@@ -216,10 +282,9 @@ with tab_setup:
                 {"Class": "6-B", "Subject": "Mathematics", "Teacher": "Nikum Sir", "Periods/Week": 6},
                 {"Class": "7-A", "Subject": "English", "Teacher": "Sandip Sir", "Periods/Week": 6},
             ])
-            sample_csv = sample_df.to_csv(index=False).encode('utf-8')
             st.download_button(
                 "📄 Download Template (CSV)",
-                data=sample_csv,
+                data=sample_df.to_csv(index=False).encode('utf-8'),
                 file_name="timetable_template.csv",
                 mime="text/csv",
                 use_container_width=True
@@ -227,41 +292,73 @@ with tab_setup:
 
         if uploaded_file is not None:
             try:
-                if uploaded_file.name.endswith(".csv"):
-                    raw_uploaded_df = pd.read_csv(uploaded_file)
-                else:
-                    raw_uploaded_df = pd.read_excel(uploaded_file)
-                
-                clean_df = normalize_allotment_df(raw_uploaded_df)
+                raw_df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
+                clean_df = normalize_allotment_df(raw_df)
                 if not clean_df.empty:
                     st.session_state.allotments_df = clean_df
-                    # Automatically extract & update classes list
                     extracted_classes = sorted(list(clean_df["Class"].unique()))
                     st.session_state.classes_list = extracted_classes
-                    st.success(f"✅ Data upload ho gaya! Total {len(clean_df)} allotments, {clean_df['Teacher'].nunique()} teachers, aur {len(extracted_classes)} classes set ho gayi hain.")
+                    st.success(f"✅ फ़ाइल सफलतापूर्वक अपलोड हुई! कुल {len(clean_df)} अलॉटमेंट्स, {clean_df['Teacher'].nunique()} शिक्षक, और {len(extracted_classes)} क्लासेज़ लोड हुईं।")
                     st.rerun()
                 else:
-                    st.error("Uploaded file mein valid Class, Subject, aur Teacher columns nahi mile.")
+                    st.error("फ़ाइल में कोई मान्य Class, Subject या Teacher डेटा नहीं मिला।")
             except Exception as e:
-                st.error(f"File padhne mein error: {e}")
+                st.error(f"फ़ाइल लोड करने में त्रुटि: {e}")
 
+    # ================= LIVE HEALTH & PRE-CHECK DASHBOARD =================
+    curr_df = st.session_state.allotments_df
+    curr_classes = st.session_state.classes_list
+    total_teachers = curr_df[curr_df["Teacher"] != "Supervised Activity"]["Teacher"].nunique()
+    total_req_periods = curr_df["Periods/Week"].sum()
+    total_avail_slots = len(curr_classes) * slots_per_class
+
+    col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+    with col_m1: st.metric("Active Classes", len(curr_classes))
+    with col_m2: st.metric("Active Teachers", total_teachers)
+    with col_m3: st.metric("Slots Demanded", f"{total_req_periods} / {total_avail_slots}")
+    with col_m4: st.metric("Slot Capacity/Class", f"{slots_per_class} slots/week")
+
+    issues, warnings = pre_check_allotments(curr_df, curr_classes, slots_per_class)
+    if issues:
+        for err in issues:
+            st.error(f"⚠️ {err}")
+    elif warnings:
+        for w in warnings:
+            st.warning(f"ℹ️ {w}")
+    else:
+        st.success("✅ **डेटा तैयार व संतुलित है:** किसी भी शिक्षक या क्लास में स्लॉट ओवरफ्लो नहीं है।")
+
+    st.markdown("##### 📝 Allotment Table Editor (सीधे टेबल में भी एडिट कर सकते हैं):")
     st.session_state.allotments_df = st.data_editor(st.session_state.allotments_df, num_rows="dynamic", use_container_width=True)
 
-    if st.button("🚀 Generate Conflict-Free Timetable (Instant)", type="primary", use_container_width=True):
-        with st.spinner("Google OR-Tools solving exact constraints..."):
+    btn_disabled = bool(issues)
+    if st.button("🚀 Generate Conflict-Free Timetable (Instant)", type="primary", use_container_width=True, disabled=btn_disabled):
+        with st.spinner("Google OR-Tools CP-SAT मॉडल गणितीय समाधान निकाल रहा है..."):
             res = solve_school_timetable()
             if res["status"] == "success":
                 st.session_state.generated_schedule = res
-                st.success(f"🎉 Timetable Generated in {res['wall_time']}s! (Status: {res['solver_status']})")
+                st.success(f"🎉 टाइमटेबल तैयार! (समय: {res['wall_time']} सेकंड | स्थिति: {res['solver_status']})")
             else:
-                st.error(f"❌ Generation Failed: {res['message']}")
+                st.error(f"❌ टाइमटेबल नहीं बन सका: {res['message']}")
 
 with tab_class_view:
     if not st.session_state.generated_schedule:
-        st.info("👈 Pehle Tab 1 mein 'Generate Conflict-Free Timetable' button dabayein.")
+        st.info("👈 कृपया पहले Tab 1 में जाकर 'Generate Conflict-Free Timetable' पर क्लिक करें।")
     else:
         sch = st.session_state.generated_schedule
-        sel_class = st.selectbox("Select Class to View:", sch["classes"])
+        col_cv1, col_cv2 = st.columns([3, 1])
+        with col_cv1:
+            sel_class = st.selectbox("कक्षा चुनें:", sch["classes"])
+        with col_cv2:
+            master_excel_bytes = generate_master_excel(sch)
+            st.download_button(
+                "📊 Download Master Excel (सभी क्लासेज़)",
+                data=master_excel_bytes,
+                file_name="School_Master_Timetable.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True
+            )
+
         grid_data = []
         for d in sch["days"]:
             row = {"Day": d}
@@ -270,16 +367,16 @@ with tab_class_view:
                 row[f"Period {p}"] = "☕ LUNCH" if subj.startswith("☕") else f"{subj}\n({teacher})"
             grid_data.append(row)
         df_class_grid = pd.DataFrame(grid_data)
-        st.subheader(f"📋 Weekly Timetable for {sel_class}")
+        st.subheader(f"📋 Weekly Timetable: {sel_class}")
         st.dataframe(df_class_grid, use_container_width=True, hide_index=True)
         st.download_button(f"📥 Download {sel_class} Timetable (CSV)", df_class_grid.to_csv(index=False).encode('utf-8'), f"{sel_class}_timetable.csv", "text/csv")
 
 with tab_teacher_view:
     if not st.session_state.generated_schedule:
-        st.info("👈 Pehle Tab 1 mein 'Generate Conflict-Free Timetable' button dabayein.")
+        st.info("👈 कृपया पहले Tab 1 में जाकर 'Generate Conflict-Free Timetable' पर क्लिक करें।")
     else:
         sch = st.session_state.generated_schedule
-        sel_teacher = st.selectbox("Select Teacher to View Roster:", sorted(sch["teachers"]))
+        sel_teacher = st.selectbox("शिक्षक चुनें:", sorted(sch["teachers"]))
         teacher_grid = []
         total_load = 0
         for d in sch["days"]:
@@ -302,13 +399,13 @@ with tab_teacher_view:
                         row[f"Period {p}"] = "Free"
             teacher_grid.append(row)
         df_teacher_grid = pd.DataFrame(teacher_grid)
-        st.subheader(f"👨‍🏫 Weekly Schedule: {sel_teacher} (Total Periods: {total_load})")
+        st.subheader(f"👨‍🏫 Weekly Schedule: {sel_teacher} (कुल पीरियड्स: {total_load})")
         st.dataframe(df_teacher_grid, use_container_width=True, hide_index=True)
-        st.download_button(f"📥 Download {sel_teacher} Roster (CSV)", df_teacher_grid.to_csv(index=False).encode('utf-8'), f"{sel_teacher}_roster.csv", "text/csv")
+        st.download_button(f"📥 Download {sel_teacher} Schedule (CSV)", df_teacher_grid.to_csv(index=False).encode('utf-8'), f"{sel_teacher}_roster.csv", "text/csv")
 
 with tab_audit:
     if not st.session_state.generated_schedule:
-        st.info("👈 Pehle Tab 1 mein 'Generate Conflict-Free Timetable' button dabayein.")
+        st.info("👈 कृपया पहले Tab 1 में जाकर 'Generate Conflict-Free Timetable' पर क्लिक करें।")
     else:
         sch = st.session_state.generated_schedule
         st.subheader("🔍 Mathematical Validation & Conflict Audit")
@@ -320,11 +417,11 @@ with tab_audit:
                 for c in sch["classes"]:
                     s_name, t_name = sch["schedule"].get((c, d, p), ("-", "-"))
                     if t_name and t_name not in ["N/A", "Supervised Activity"]:
-                        if t_name in seen_t: clashes.append(f"Clash on {d} P{p}: {t_name} in {seen_t[t_name]} and {c}")
+                        if t_name in seen_t: clashes.append(f"Clash on {d} Period {p}: {t_name} in {seen_t[t_name]} and {c}")
                         else: seen_t[t_name] = c
 
         if not clashes:
-            st.success("✅ **Zero Clashes**: Pura timetable 100% conflict-free hai. Koi bhi teacher double-booked nahi hai!")
+            st.success("✅ **Zero Clashes**: पूरा टाइमटेबल 100% क्लैश-फ्री है। कोई भी शिक्षक एक ही समय में दो जगह नहीं है।")
         else:
             for cl in clashes: st.error(cl)
 
@@ -333,5 +430,6 @@ with tab_audit:
         workload = []
         for t in sorted(sch["teachers"]):
             cnt = sum(1 for (c, d, p), (subj, t_assigned) in sch["schedule"].items() if t_assigned == t)
-            workload.append({"Teacher Name": t, "Weekly Teaching Periods": cnt, "Daily Avg": round(cnt / len(sch["days"]), 1)})
+            workload.append({"Teacher Name": t, "Weekly Teaching Periods": cnt, "Daily Avg": round(cnt / len(sch["days"]), 2)})
         st.dataframe(pd.DataFrame(workload), use_container_width=True)
+
