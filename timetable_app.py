@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import io
 from ortools.sat.python import cp_model
 
 st.set_page_config(page_title="School Timetable Pro (Deterministic)", layout="wide")
@@ -29,6 +30,35 @@ if "allotments_df" not in st.session_state:
 
 if "generated_schedule" not in st.session_state:
     st.session_state.generated_schedule = None
+
+# ================= HELPER FUNCTIONS =================
+def normalize_allotment_df(df):
+    """Excel / CSV के कॉलम्स को स्टैंडर्ड फॉर्मेट में मैप करता है"""
+    col_map = {}
+    for col in df.columns:
+        c_clean = str(col).strip().lower().replace(" ", "").replace("_", "")
+        if c_clean in ["class", "grade", "section", "classsection"]:
+            col_map[col] = "Class"
+        elif c_clean in ["subject", "sub", "subjectname"]:
+            col_map[col] = "Subject"
+        elif c_clean in ["teacher", "teachername", "faculty", "facultyname"]:
+            col_map[col] = "Teacher"
+        elif c_clean in ["periods/week", "periodsperweek", "periods", "count", "weeklyperiods", "quota"]:
+            col_map[col] = "Periods/Week"
+    
+    df = df.rename(columns=col_map)
+    required = ["Class", "Subject", "Teacher", "Periods/Week"]
+    for req in required:
+        if req not in df.columns:
+            if req == "Periods/Week": df[req] = 4
+            else: df[req] = ""
+    
+    df = df[required].dropna(subset=["Class", "Subject", "Teacher"])
+    df["Class"] = df["Class"].astype(str).str.strip()
+    df["Subject"] = df["Subject"].astype(str).str.strip()
+    df["Teacher"] = df["Teacher"].astype(str).str.strip()
+    df["Periods/Week"] = pd.to_numeric(df["Periods/Week"], errors="coerce").fillna(4).astype(int)
+    return df
 
 # ================= OR-TOOLS SOLVER ENGINE =================
 def solve_school_timetable():
@@ -168,6 +198,53 @@ with tab_setup:
 
     st.markdown("---")
     st.subheader("2. Faculty & Subject Allotment Matrix")
+
+    # Excel / CSV File Upload & Sample Template Section
+    with st.expander("📥 Bulk Upload from Excel / CSV (या Sample Template Download करें)", expanded=True):
+        col_up1, col_up2 = st.columns([3, 1])
+        with col_up1:
+            uploaded_file = st.file_uploader(
+                "Teacher & Subject Allotment File Upload Karein (.xlsx, .xls, .csv):",
+                type=["xlsx", "xls", "csv"],
+                help="File mein columns hone chahiye: Class, Subject, Teacher, Periods/Week"
+            )
+        with col_up2:
+            st.write("**Sample Template:**")
+            sample_df = pd.DataFrame([
+                {"Class": "6-A", "Subject": "Mathematics", "Teacher": "Nikum Sir", "Periods/Week": 6},
+                {"Class": "6-A", "Subject": "Science", "Teacher": "Ashok Sir", "Periods/Week": 6},
+                {"Class": "6-B", "Subject": "Mathematics", "Teacher": "Nikum Sir", "Periods/Week": 6},
+                {"Class": "7-A", "Subject": "English", "Teacher": "Sandip Sir", "Periods/Week": 6},
+            ])
+            sample_csv = sample_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                "📄 Download Template (CSV)",
+                data=sample_csv,
+                file_name="timetable_template.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+
+        if uploaded_file is not None:
+            try:
+                if uploaded_file.name.endswith(".csv"):
+                    raw_uploaded_df = pd.read_csv(uploaded_file)
+                else:
+                    raw_uploaded_df = pd.read_excel(uploaded_file)
+                
+                clean_df = normalize_allotment_df(raw_uploaded_df)
+                if not clean_df.empty:
+                    st.session_state.allotments_df = clean_df
+                    # Automatically extract & update classes list
+                    extracted_classes = sorted(list(clean_df["Class"].unique()))
+                    st.session_state.classes_list = extracted_classes
+                    st.success(f"✅ Data upload ho gaya! Total {len(clean_df)} allotments, {clean_df['Teacher'].nunique()} teachers, aur {len(extracted_classes)} classes set ho gayi hain.")
+                    st.rerun()
+                else:
+                    st.error("Uploaded file mein valid Class, Subject, aur Teacher columns nahi mile.")
+            except Exception as e:
+                st.error(f"File padhne mein error: {e}")
+
     st.session_state.allotments_df = st.data_editor(st.session_state.allotments_df, num_rows="dynamic", use_container_width=True)
 
     if st.button("🚀 Generate Conflict-Free Timetable (Instant)", type="primary", use_container_width=True):
@@ -257,5 +334,4 @@ with tab_audit:
         for t in sorted(sch["teachers"]):
             cnt = sum(1 for (c, d, p), (subj, t_assigned) in sch["schedule"].items() if t_assigned == t)
             workload.append({"Teacher Name": t, "Weekly Teaching Periods": cnt, "Daily Avg": round(cnt / len(sch["days"]), 1)})
-        st.dataframe(pd.DataFrame(workload), use_container_width=True, hide_index=True)
-
+        st.dataframe(pd.DataFrame(workload), use_container_width=True)
