@@ -4,7 +4,7 @@ import datetime
 import io
 from ortools.sat.python import cp_model
 
-st.set_page_config(page_title="School Timetable Pro (Deterministic & Conflict-Free)", layout="wide", page_icon="🏫")
+st.set_page_config(page_title="School Timetable Pro (Fully Dynamic Breaks & Schedule)", layout="wide", page_icon="🏫")
 
 # ================= STATE INITIALIZATION =================
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -13,13 +13,16 @@ if "period_duration" not in st.session_state: st.session_state.period_duration =
 if "school_start_time" not in st.session_state: st.session_state.school_start_time = datetime.time(8, 0)
 
 if "num_breaks" not in st.session_state: st.session_state.num_breaks = 2
-if "break1_name" not in st.session_state: st.session_state.break1_name = "☕ Morning Recess"
-if "break1_after" not in st.session_state: st.session_state.break1_after = 2
-if "break1_duration" not in st.session_state: st.session_state.break1_duration = 15
 
-if "break2_name" not in st.session_state: st.session_state.break2_name = "🍱 Lunch Break"
-if "break2_after" not in st.session_state: st.session_state.break2_after = 4
-if "break2_duration" not in st.session_state: st.session_state.break2_duration = 35
+# Store dynamic breaks list in session state
+if "breaks_data" not in st.session_state:
+    st.session_state.breaks_data = [
+        {"name": "☕ Morning Recess", "after_period": 2, "duration": 15},
+        {"name": "🍱 Lunch Break", "after_period": 4, "duration": 35},
+        {"name": "🥛 Afternoon Snack Break", "after_period": 6, "duration": 15},
+        {"name": "🍎 Fruit Break", "after_period": 1, "duration": 10},
+        {"name": "⚽ Evening Recess", "after_period": 7, "duration": 20},
+    ]
 
 if "classes_list" not in st.session_state:
     st.session_state.classes_list = ["6-A", "6-B", "7-A", "7-B"]
@@ -44,7 +47,7 @@ if "generated_schedule" not in st.session_state:
 
 # ================= HELPER FUNCTIONS =================
 def calculate_bell_schedule(start_time_obj, period_duration_mins, total_periods, breaks_list):
-    """दैनिक समय सारिणी (Start Time, End Time) की पूरी टाइमलाइन की गणना करता है"""
+    """दैनिक समय सारिणी (Start Time, End Time) की पूरी टाइमलाइन की गणना करता है (0, 1, 2, 3 या कितने भी ब्रेक्स के साथ)"""
     cur_time = datetime.datetime.combine(datetime.date.today(), start_time_obj)
     timeline = []
     
@@ -287,8 +290,8 @@ def solve_school_timetable(timeline, dismissal_time, time_limit=15.0):
         }
 
 # ================= USER INTERFACE =================
-st.title("🏫 School Timetable Pro (Deterministic & Timing Engine)")
-st.caption("Google OR-Tools CP-SAT संचालित सटीक शेड्यूलर + कस्टमाइज़ेबल बेल शेड्यूल एवं मल्टीपल ब्रेक्स")
+st.title("🏫 School Timetable Pro (Fully Flexible Breaks & Timing)")
+st.caption("Google OR-Tools CP-SAT सटीक शेड्यूलर + कस्टमाइज़ेबल बेल शेड्यूल (0, 1, 2, 3 या जितने चाहें उतने ब्रेक्स)")
 
 tab_setup, tab_class_view, tab_teacher_view, tab_audit = st.tabs([
     "⚙️ 1. Setup & Bell Schedule", 
@@ -309,66 +312,98 @@ with tab_setup:
     with col_t4:
         st.session_state.school_start_time = st.time_input("School Start Time", value=st.session_state.school_start_time)
 
-    st.markdown("##### ☕ Break & Lunch Recess Settings:")
-    num_breaks_opt = st.radio(
-        "दिन में कितने Breaks / Recess होते हैं?", 
-        options=[1, 2], 
-        index=0 if st.session_state.num_breaks == 1 else 1,
-        format_func=lambda x: "1 Break (केवल Lunch Break)" if x == 1 else "2 Breaks (Short Recess + Lunch Break)",
-        horizontal=True
-    )
-    st.session_state.num_breaks = num_breaks_opt
+    st.markdown("---")
+    st.subheader("☕ Custom Breaks & Recess Configuration")
+    st.caption("आप अपनी इच्छानुसार जितने चाहें उतने ब्रेक्स (0, 1, 2, 3 आदि) रख सकते हैं। प्रत्येक ब्रेक का नाम, समय और पीरियड अपनी ज़रूरत के मुताबिक सेट करें:")
 
-    breaks_list = []
-    if st.session_state.num_breaks == 1:
-        col_b1, col_b2, col_b3 = st.columns(3)
-        with col_b1:
-            st.session_state.break1_name = st.text_input("Break का नाम:", value="🍱 Lunch Break")
-        with col_b2:
-            st.session_state.break1_after = st.number_input("किस Period के बाद?", 1, int(st.session_state.periods_per_day) - 1, min(4, int(st.session_state.periods_per_day) - 1))
-        with col_b3:
-            st.session_state.break1_duration = st.number_input("Duration (मिनट में):", 5, 90, 30, step=5)
-        breaks_list.append({"name": st.session_state.break1_name, "after_period": st.session_state.break1_after, "duration": st.session_state.break1_duration})
+    max_possible_breaks = max(0, int(st.session_state.periods_per_day) - 1)
+    
+    col_ctrl1, col_ctrl2 = st.columns([2, 3])
+    with col_ctrl1:
+        selected_num_breaks = st.number_input(
+            "दिन में कुल कितने Breaks / Recesses रखने हैं?", 
+            min_value=0, 
+            max_value=max_possible_breaks, 
+            value=min(int(st.session_state.num_breaks), max_possible_breaks),
+            step=1,
+            help="अगर कोई ब्रेक नहीं चाहिए तो 0 चुनें, 1 ब्रेक के लिए 1, 2 के लिए 2, 3 के लिए 3 आदि।"
+        )
+        st.session_state.num_breaks = selected_num_breaks
+
+    with col_ctrl2:
+        st.write("**Quick Presets (जल्दी चुनने के लिए):**")
+        p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+        if p_col1.button("0 Break (कोई नहीं)", use_container_width=True):
+            st.session_state.num_breaks = 0
+            st.rerun()
+        if p_col2.button("1 Break (Lunch)", use_container_width=True):
+            st.session_state.num_breaks = 1
+            st.rerun()
+        if p_col3.button("2 Breaks (Recess+Lunch)", use_container_width=True):
+            st.session_state.num_breaks = 2
+            st.rerun()
+        if p_col4.button("3 Breaks (Recess+Lunch+Snack)", use_container_width=True):
+            st.session_state.num_breaks = 3
+            st.rerun()
+
+    active_breaks = []
+    if st.session_state.num_breaks == 0:
+        st.info("ℹ️ **कोई ब्रेक सेट नहीं है**: पूरे दिन लगातार टीचिंग पीरियड्स चलेंगे।")
     else:
-        st.markdown("**पहला ब्रेक (Short Recess / Break 1):**")
-        col_b1_1, col_b1_2, col_b1_3 = st.columns(3)
-        with col_b1_1:
-            st.session_state.break1_name = st.text_input("Break 1 नाम:", value=st.session_state.break1_name)
-        with col_b1_2:
-            st.session_state.break1_after = st.number_input("Break 1 किस Period के बाद?", 1, int(st.session_state.periods_per_day) - 2, min(2, int(st.session_state.periods_per_day) - 2))
-        with col_b1_3:
-            st.session_state.break1_duration = st.number_input("Break 1 Duration (मिनट):", 5, 60, int(st.session_state.break1_duration), step=5)
-        breaks_list.append({"name": st.session_state.break1_name, "after_period": st.session_state.break1_after, "duration": st.session_state.break1_duration})
+        st.write(f"**नीचे {st.session_state.num_breaks} ब्रेक्स का विवरण सेट करें:**")
+        default_break_presets = [
+            {"name": "☕ Short Recess / Break 1", "after": 2, "duration": 15},
+            {"name": "🍱 Lunch Break / Break 2", "after": 4, "duration": 35},
+            {"name": "🥛 Afternoon Snack Break", "after": 6, "duration": 15},
+            {"name": "🍎 Fruit Break", "after": 1, "duration": 10},
+            {"name": "⚽ Evening Activity Break", "after": 7, "duration": 20},
+        ]
 
-        st.markdown("**दूसरा ब्रेक (Lunch Break / Recess 2):**")
-        col_b2_1, col_b2_2, col_b2_3 = st.columns(3)
-        with col_b2_1:
-            st.session_state.break2_name = st.text_input("Break 2 नाम:", value=st.session_state.break2_name)
-        with col_b2_2:
-            min_after = int(st.session_state.break1_after) + 1
-            max_after = int(st.session_state.periods_per_day) - 1
-            default_after = max(min_after, min(int(st.session_state.break2_after), max_after))
-            st.session_state.break2_after = st.number_input("Break 2 किस Period के बाद?", min_after, max_after, default_after)
-        with col_b2_3:
-            st.session_state.break2_duration = st.number_input("Break 2 Duration (मिनट):", 5, 90, int(st.session_state.break2_duration), step=5)
-        breaks_list.append({"name": st.session_state.break2_name, "after_period": st.session_state.break2_after, "duration": st.session_state.break2_duration})
+        for i in range(1, int(st.session_state.num_breaks) + 1):
+            with st.container():
+                default_info = default_break_presets[i - 1] if i <= len(default_break_presets) else {"name": f"Break {i}", "after": min(i * 2, max_possible_breaks), "duration": 20}
+                col_b1, col_b2, col_b3 = st.columns([3, 2, 2])
+                with col_b1:
+                    b_name = st.text_input(
+                        f"Break {i} का नाम / लेबल:", 
+                        value=default_info["name"], 
+                        key=f"dyn_break_name_{i}"
+                    )
+                with col_b2:
+                    b_after = st.number_input(
+                        f"किस Period के बाद?", 
+                        min_value=1, 
+                        max_value=max_possible_breaks, 
+                        value=min(default_info["after"], max_possible_breaks),
+                        key=f"dyn_break_after_{i}"
+                    )
+                with col_b3:
+                    b_dur = st.number_input(
+                        f"Duration (मिनट में):", 
+                        min_value=5, 
+                        max_value=90, 
+                        value=default_info["duration"], 
+                        step=5,
+                        key=f"dyn_break_dur_{i}"
+                    )
+                active_breaks.append({"name": b_name, "after_period": b_after, "duration": b_dur})
 
     # Timeline calculation
     current_timeline, current_dismissal = calculate_bell_schedule(
         st.session_state.school_start_time,
         st.session_state.period_duration,
         st.session_state.periods_per_day,
-        breaks_list
+        active_breaks
     )
 
     with st.expander("🕒 Bell Schedule & Daily Timeline Preview (दिन की समय-सारणी देखें)", expanded=True):
-        st.info(f"🔔 **School Start:** {st.session_state.school_start_time.strftime('%I:%M %p')} | 🏁 **School Dismissal:** {current_dismissal} | ⏱️ **Period Length:** {st.session_state.period_duration} मिनट")
+        st.info(f"🔔 **School Start:** {st.session_state.school_start_time.strftime('%I:%M %p')} | 🏁 **School Dismissal:** {current_dismissal} | ⏱️ **Period Length:** {st.session_state.period_duration} मिनट | ☕ **Total Breaks:** {len(active_breaks)}")
         timeline_display = []
         for it in current_timeline:
             timeline_display.append({
                 "Slot": it["label"],
                 "Time Interval": it["time_str"],
-                "Type": "☕ Recess / Lunch" if it["type"] == "break" else "📚 Teaching Lecture"
+                "Type": f"☕ Break / Recess" if it["type"] == "break" else "📚 Teaching Lecture"
             })
         st.dataframe(pd.DataFrame(timeline_display), use_container_width=True, hide_index=True)
 
