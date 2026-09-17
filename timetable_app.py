@@ -129,14 +129,18 @@ def pre_check_allotments(df_allot, classes, slots_per_class):
     issues = []
     warnings = []
     
+    df_clean = df_allot.copy()
+    df_clean["Periods/Week"] = pd.to_numeric(df_clean["Periods/Week"], errors="coerce").fillna(0).astype(int)
+    
     for c in classes:
-        sub_df = df_allot[df_allot["Class"] == c]
-        total_req = sub_df["Periods/Week"].sum()
+        sub_df = df_clean[df_clean["Class"] == c]
+        total_req = int(sub_df["Periods/Week"].sum())
         if total_req > slots_per_class:
             issues.append(f"Class '{c}': कुल माँगे गए {total_req} पीरियड, जबकि उपलब्ध केवल {slots_per_class} स्लॉट्स हैं।")
     
-    teacher_totals = df_allot[df_allot["Teacher"] != "Supervised Activity"].groupby("Teacher")["Periods/Week"].sum()
+    teacher_totals = df_clean[df_clean["Teacher"] != "Supervised Activity"].groupby("Teacher")["Periods/Week"].sum()
     for t, total_periods in teacher_totals.items():
+        total_periods = int(total_periods)
         if total_periods > slots_per_class:
             issues.append(f"Teacher / Facility '{t}': कुल {total_periods} पीरियड असाइन हुए हैं, जो हफ़्ते की अधिकतम सीमा ({slots_per_class} स्लॉट्स) से ज़्यादा हैं।")
         elif total_periods >= int(slots_per_class * 0.9):
@@ -178,7 +182,8 @@ def solve_school_timetable(timeline, dismissal_time, time_limit=15.0):
     w_days = int(st.session_state.working_days)
     p_per_day = int(st.session_state.periods_per_day)
     classes = [str(c).strip() for c in st.session_state.classes_list if str(c).strip()]
-    df_allot = st.session_state.allotments_df
+    df_allot = st.session_state.allotments_df.copy()
+    df_allot["Periods/Week"] = pd.to_numeric(df_allot["Periods/Week"], errors="coerce").fillna(4).astype(int)
 
     days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][:w_days]
     teaching_periods = list(range(1, p_per_day + 1))
@@ -439,7 +444,7 @@ with tab_setup:
             st.session_state.classes_list
         )
     with col_c_add:
-        new_cls_input = st.text_input("नई Class जोड़ें (उदा. 8-A):", key="new_cls_add_key_v6")
+        new_cls_input = st.text_input("नई Class जोड़ें (उदा. 8-A):", key="new_cls_add_key_v7")
         if st.button("➕ Add New Class", use_container_width=True):
             c_clean = new_cls_input.strip()
             if c_clean and c_clean not in st.session_state.classes_list:
@@ -458,14 +463,18 @@ with tab_setup:
             else:
                 st.error("कम से कम एक Class होनी आवश्यक है!")
 
-    # Class Load Status Indicator
+    # Class Load Status Indicator (SAFE NUMERIC PARSING)
     class_current_rows = st.session_state.allotments_df[st.session_state.allotments_df["Class"] == sel_entry_class].copy()
-    cls_allotted_periods = class_current_rows["Periods/Week"].sum() if not class_current_rows.empty else 0
+    if not class_current_rows.empty:
+        cls_allotted_periods = int(pd.to_numeric(class_current_rows["Periods/Week"], errors="coerce").fillna(0).sum())
+    else:
+        cls_allotted_periods = 0
 
     col_stat1, col_stat2 = st.columns([3, 2])
     with col_stat1:
         st.write(f"**{sel_entry_class} का कुल लोड:** `{cls_allotted_periods} / {slots_per_class}` पीरियड्स प्रति सप्ताह")
-        st.progress(min(1.0, cls_allotted_periods / slots_per_class if slots_per_class > 0 else 0))
+        progress_val = min(1.0, max(0.0, float(cls_allotted_periods) / float(slots_per_class))) if slots_per_class > 0 else 0.0
+        st.progress(progress_val)
     with col_stat2:
         if cls_allotted_periods == slots_per_class:
             st.success(f"✅ एकदम सही: {slots_per_class} स्लॉट्स पूरे हैं।")
@@ -512,7 +521,7 @@ with tab_setup:
             s_c = in_subj.strip()
             t_c = in_teacher.strip()
             if s_c and t_c:
-                new_row = pd.DataFrame([{"Class": sel_entry_class, "Subject": s_c, "Teacher": t_c, "Periods/Week": in_periods}])
+                new_row = pd.DataFrame([{"Class": sel_entry_class, "Subject": s_c, "Teacher": t_c, "Periods/Week": int(in_periods)}])
                 st.session_state.allotments_df = pd.concat([st.session_state.allotments_df, new_row], ignore_index=True)
                 st.success(f"✅ {sel_entry_class} में '{s_c} ({t_c})' जोड़ दिया गया!")
                 st.rerun()
@@ -531,8 +540,9 @@ with tab_setup:
 
     # Sync changes back to master df
     if not edited_class_table.equals(class_table):
-        cleaned_sub = edited_class_table.dropna(subset=["Subject", "Teacher"])
+        cleaned_sub = edited_class_table.dropna(subset=["Subject", "Teacher"]).copy()
         cleaned_sub["Class"] = sel_entry_class
+        cleaned_sub["Periods/Week"] = pd.to_numeric(cleaned_sub["Periods/Week"], errors="coerce").fillna(4).astype(int).clip(lower=1)
         other_rows = st.session_state.allotments_df[st.session_state.allotments_df["Class"] != sel_entry_class]
         st.session_state.allotments_df = pd.concat([other_rows, cleaned_sub[["Class", "Subject", "Teacher", "Periods/Week"]]], ignore_index=True)
         st.rerun()
@@ -559,15 +569,17 @@ with tab_setup:
     with st.expander("📋 3. View / Edit Full Master Table (सभी क्लासेस और टीचर्स की संयुक्त टेबल)", expanded=False):
         st.caption("यहाँ सभी क्लासेस, विषयों और एक्टिविटीज़ का पूरा डेटा एक साथ एडिट किया जा सकता है:")
         st.session_state.allotments_df = st.data_editor(st.session_state.allotments_df, num_rows="dynamic", use_container_width=True)
+        st.session_state.allotments_df["Periods/Week"] = pd.to_numeric(st.session_state.allotments_df["Periods/Week"], errors="coerce").fillna(4).astype(int).clip(lower=1)
 
     # ================= LIVE HEALTH & CAPACITY AUDIT =================
     st.markdown("---")
     st.subheader("3. Live System Health & Capacity Audit")
 
-    curr_df = st.session_state.allotments_df
+    curr_df = st.session_state.allotments_df.copy()
+    curr_df["Periods/Week"] = pd.to_numeric(curr_df["Periods/Week"], errors="coerce").fillna(4).astype(int)
     curr_classes = st.session_state.classes_list
     total_teachers = curr_df[curr_df["Teacher"] != "Supervised Activity"]["Teacher"].nunique()
-    total_req_periods = curr_df["Periods/Week"].sum()
+    total_req_periods = int(curr_df["Periods/Week"].sum())
     total_avail_slots = len(curr_classes) * slots_per_class
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
