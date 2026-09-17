@@ -4,7 +4,7 @@ import datetime
 import io
 from ortools.sat.python import cp_model
 
-st.set_page_config(page_title="School Timetable Pro (Fully Dynamic Breaks & Schedule)", layout="wide", page_icon="🏫")
+st.set_page_config(page_title="School Timetable Pro (Deterministic & Timing Engine)", layout="wide", page_icon="🏫")
 
 # ================= STATE INITIALIZATION =================
 if "working_days" not in st.session_state: st.session_state.working_days = 6
@@ -14,7 +14,6 @@ if "school_start_time" not in st.session_state: st.session_state.school_start_ti
 
 if "num_breaks" not in st.session_state: st.session_state.num_breaks = 2
 
-# Store dynamic breaks list in session state
 if "breaks_data" not in st.session_state:
     st.session_state.breaks_data = [
         {"name": "☕ Morning Recess", "after_period": 2, "duration": 15},
@@ -35,7 +34,6 @@ if "allotments_df" not in st.session_state:
         ("Hindi", 6, {"6-A": "Apeksha Mam", "6-B": "Apeksha Mam", "7-A": "Rajesh Sir", "7-B": "Rajesh Sir"}),
         ("Social Studies", 6, {"6-A": "Rudra Sir", "6-B": "Rudra Sir", "7-A": "Rakesh Sir", "7-B": "Rakesh Sir"}),
         ("Sanskrit", 6, {"6-A": "Padma Mam", "6-B": "Padma Mam", "7-A": "Padma Mam", "7-B": "Padma Mam"}),
-        ("Sports", 6, {"6-A": "Vikram Sir", "6-B": "Vikram Sir", "7-A": "Vikram Sir", "7-B": "Vikram Sir"}),
     ]
     st.session_state.allotments_df = pd.DataFrame([
         {"Class": c, "Subject": sub, "Teacher": t_map[c], "Periods/Week": p}
@@ -47,11 +45,10 @@ if "generated_schedule" not in st.session_state:
 
 # ================= HELPER FUNCTIONS =================
 def calculate_bell_schedule(start_time_obj, period_duration_mins, total_periods, breaks_list):
-    """दैनिक समय सारिणी (Start Time, End Time) की पूरी टाइमलाइन की गणना करता है (0, 1, 2, 3 या कितने भी ब्रेक्स के साथ)"""
+    """दैनिक समय सारिणी (Start Time, End Time) की पूरी टाइमलाइन की गणना करता है"""
     cur_time = datetime.datetime.combine(datetime.date.today(), start_time_obj)
     timeline = []
     
-    # Sort breaks by after_period
     sorted_breaks = sorted(breaks_list, key=lambda x: int(x["after_period"]))
     breaks_map = {}
     for b in sorted_breaks:
@@ -290,18 +287,18 @@ def solve_school_timetable(timeline, dismissal_time, time_limit=15.0):
         }
 
 # ================= USER INTERFACE =================
-st.title("🏫 School Timetable Pro (Fully Flexible Breaks & Timing)")
-st.caption("Google OR-Tools CP-SAT सटीक शेड्यूलर + कस्टमाइज़ेबल बेल शेड्यूल (0, 1, 2, 3 या जितने चाहें उतने ब्रेक्स)")
+st.title("🏫 School Timetable Pro (Deterministic & Timing Engine)")
+st.caption("Google OR-Tools CP-SAT सटीक शेड्यूलर + क्लास-वार मैन्युअल एंट्री, एक्सेल बल्क अपलोड और कस्टमाइज़ेबल ब्रेक्स")
 
 tab_setup, tab_class_view, tab_teacher_view, tab_audit = st.tabs([
-    "⚙️ 1. Setup & Bell Schedule", 
+    "⚙️ 1. Setup & Allotments", 
     "📅 2. Class-Wise Timetable", 
     "👨‍🏫 3. Teacher-Wise Schedule",
     "🔍 4. Conflict & Load Audit"
 ])
 
 with tab_setup:
-    st.subheader("1. Bell Schedule & Daily Timing Settings")
+    st.subheader("1. Bell Schedule & Timing Settings")
     col_t1, col_t2, col_t3, col_t4 = st.columns(4)
     with col_t1:
         st.session_state.working_days = st.number_input("Working Days (सप्ताह में दिन)", 1, 7, int(st.session_state.working_days))
@@ -312,108 +309,194 @@ with tab_setup:
     with col_t4:
         st.session_state.school_start_time = st.time_input("School Start Time", value=st.session_state.school_start_time)
 
-    st.markdown("---")
-    st.subheader("☕ Custom Breaks & Recess Configuration")
-    st.caption("आप अपनी इच्छानुसार जितने चाहें उतने ब्रेक्स (0, 1, 2, 3 आदि) रख सकते हैं। प्रत्येक ब्रेक का नाम, समय और पीरियड अपनी ज़रूरत के मुताबिक सेट करें:")
-
+    # Breaks Configuration
     max_possible_breaks = max(0, int(st.session_state.periods_per_day) - 1)
-    
-    col_ctrl1, col_ctrl2 = st.columns([2, 3])
-    with col_ctrl1:
-        selected_num_breaks = st.number_input(
-            "दिन में कुल कितने Breaks / Recesses रखने हैं?", 
-            min_value=0, 
-            max_value=max_possible_breaks, 
-            value=min(int(st.session_state.num_breaks), max_possible_breaks),
-            step=1,
-            help="अगर कोई ब्रेक नहीं चाहिए तो 0 चुनें, 1 ब्रेक के लिए 1, 2 के लिए 2, 3 के लिए 3 आदि।"
-        )
-        st.session_state.num_breaks = selected_num_breaks
+    with st.expander("☕ Breaks & Recess Settings (जितने चाहें उतने ब्रेक्स सेट करें)", expanded=False):
+        col_ctrl1, col_ctrl2 = st.columns([2, 3])
+        with col_ctrl1:
+            st.session_state.num_breaks = st.number_input(
+                "दिन में कुल Breaks (0, 1, 2, 3...):", 
+                min_value=0, 
+                max_value=max_possible_breaks, 
+                value=min(int(st.session_state.num_breaks), max_possible_breaks),
+                step=1
+            )
+        with col_ctrl2:
+            st.write("**Quick Presets:**")
+            p_col1, p_col2, p_col3, p_col4 = st.columns(4)
+            if p_col1.button("0 Break", use_container_width=True):
+                st.session_state.num_breaks = 0
+                st.rerun()
+            if p_col2.button("1 (Lunch)", use_container_width=True):
+                st.session_state.num_breaks = 1
+                st.rerun()
+            if p_col3.button("2 (Recess+Lunch)", use_container_width=True):
+                st.session_state.num_breaks = 2
+                st.rerun()
+            if p_col4.button("3 Breaks", use_container_width=True):
+                st.session_state.num_breaks = 3
+                st.rerun()
 
-    with col_ctrl2:
-        st.write("**Quick Presets (जल्दी चुनने के लिए):**")
-        p_col1, p_col2, p_col3, p_col4 = st.columns(4)
-        if p_col1.button("0 Break (कोई नहीं)", use_container_width=True):
-            st.session_state.num_breaks = 0
-            st.rerun()
-        if p_col2.button("1 Break (Lunch)", use_container_width=True):
-            st.session_state.num_breaks = 1
-            st.rerun()
-        if p_col3.button("2 Breaks (Recess+Lunch)", use_container_width=True):
-            st.session_state.num_breaks = 2
-            st.rerun()
-        if p_col4.button("3 Breaks (Recess+Lunch+Snack)", use_container_width=True):
-            st.session_state.num_breaks = 3
-            st.rerun()
-
-    active_breaks = []
-    if st.session_state.num_breaks == 0:
-        st.info("ℹ️ **कोई ब्रेक सेट नहीं है**: पूरे दिन लगातार टीचिंग पीरियड्स चलेंगे।")
-    else:
-        st.write(f"**नीचे {st.session_state.num_breaks} ब्रेक्स का विवरण सेट करें:**")
+        active_breaks = []
         default_break_presets = [
-            {"name": "☕ Short Recess / Break 1", "after": 2, "duration": 15},
-            {"name": "🍱 Lunch Break / Break 2", "after": 4, "duration": 35},
+            {"name": "☕ Short Recess", "after": 2, "duration": 15},
+            {"name": "🍱 Lunch Break", "after": 4, "duration": 35},
             {"name": "🥛 Afternoon Snack Break", "after": 6, "duration": 15},
             {"name": "🍎 Fruit Break", "after": 1, "duration": 10},
-            {"name": "⚽ Evening Activity Break", "after": 7, "duration": 20},
         ]
-
-        for i in range(1, int(st.session_state.num_breaks) + 1):
-            with st.container():
-                default_info = default_break_presets[i - 1] if i <= len(default_break_presets) else {"name": f"Break {i}", "after": min(i * 2, max_possible_breaks), "duration": 20}
-                col_b1, col_b2, col_b3 = st.columns([3, 2, 2])
-                with col_b1:
-                    b_name = st.text_input(
-                        f"Break {i} का नाम / लेबल:", 
-                        value=default_info["name"], 
-                        key=f"dyn_break_name_{i}"
-                    )
-                with col_b2:
-                    b_after = st.number_input(
-                        f"किस Period के बाद?", 
-                        min_value=1, 
-                        max_value=max_possible_breaks, 
-                        value=min(default_info["after"], max_possible_breaks),
-                        key=f"dyn_break_after_{i}"
-                    )
-                with col_b3:
-                    b_dur = st.number_input(
-                        f"Duration (मिनट में):", 
-                        min_value=5, 
-                        max_value=90, 
-                        value=default_info["duration"], 
-                        step=5,
-                        key=f"dyn_break_dur_{i}"
-                    )
+        if st.session_state.num_breaks > 0:
+            for i in range(1, int(st.session_state.num_breaks) + 1):
+                def_val = default_break_presets[i - 1] if i <= len(default_break_presets) else {"name": f"Break {i}", "after": min(i * 2, max_possible_breaks), "duration": 20}
+                b_c1, b_c2, b_c3 = st.columns([3, 2, 2])
+                with b_c1: b_name = st.text_input(f"Break {i} Name:", value=def_val["name"], key=f"b_name_inp_{i}")
+                with b_c2: b_after = st.number_input(f"After Period:", 1, max_possible_breaks, min(def_val["after"], max_possible_breaks), key=f"b_aft_inp_{i}")
+                with b_c3: b_dur = st.number_input(f"Duration (mins):", 5, 90, def_val["duration"], step=5, key=f"b_dur_inp_{i}")
                 active_breaks.append({"name": b_name, "after_period": b_after, "duration": b_dur})
 
-    # Timeline calculation
     current_timeline, current_dismissal = calculate_bell_schedule(
         st.session_state.school_start_time,
         st.session_state.period_duration,
         st.session_state.periods_per_day,
-        active_breaks
+        active_breaks if st.session_state.num_breaks > 0 else []
     )
 
-    with st.expander("🕒 Bell Schedule & Daily Timeline Preview (दिन की समय-सारणी देखें)", expanded=True):
-        st.info(f"🔔 **School Start:** {st.session_state.school_start_time.strftime('%I:%M %p')} | 🏁 **School Dismissal:** {current_dismissal} | ⏱️ **Period Length:** {st.session_state.period_duration} मिनट | ☕ **Total Breaks:** {len(active_breaks)}")
-        timeline_display = []
-        for it in current_timeline:
-            timeline_display.append({
-                "Slot": it["label"],
-                "Time Interval": it["time_str"],
-                "Type": f"☕ Break / Recess" if it["type"] == "break" else "📚 Teaching Lecture"
-            })
-        st.dataframe(pd.DataFrame(timeline_display), use_container_width=True, hide_index=True)
-
     st.markdown("---")
-    st.subheader("2. Classes & Faculty Allotments")
-    classes_input = st.text_input("Classes List (अल्पविराम से अलग करें):", value=", ".join(st.session_state.classes_list))
-    st.session_state.classes_list = [c.strip() for c in classes_input.split(",") if c.strip()]
+    st.subheader("2. Faculty, Subjects & Class Allotments")
 
-    # Excel / CSV Bulk Upload & Template Box
-    with st.expander("📥 Bulk Upload from Excel / CSV (या Sample Template Download करें)", expanded=False):
+    # Entry Mode Choice
+    entry_mode = st.radio(
+        "डेटा फ़ीड / मैनेज करने का तरीका चुनें:",
+        options=[
+            "🏫 Class & Section-Wise Manual Entry (कक्षा-वार टेबल)",
+            "📋 Full Master Allotments Table (सभी क्लासेस की संयुक्त टेबल)",
+            "📥 Bulk Upload from Excel / CSV (एक्सेल फ़ाइल से अपलोड)"
+        ],
+        horizontal=True
+    )
+
+    slots_per_class = int(st.session_state.working_days) * int(st.session_state.periods_per_day)
+
+    # ================= MODE 1: CLASS & SECTION WISE MANUAL ENTRY =================
+    if "Class & Section-Wise" in entry_mode:
+        st.markdown("#### 🏫 कक्षा / सेक्शन वार मैन्युअल एंट्री")
+        
+        col_c_sel, col_c_add, col_c_del = st.columns([3, 2, 1])
+        with col_c_sel:
+            if not st.session_state.classes_list:
+                st.session_state.classes_list = ["6-A"]
+            sel_entry_class = st.selectbox(
+                "जिस Class / Section का डेटा देखना या जोड़ना है उसे चुनें:", 
+                st.session_state.classes_list
+            )
+        with col_c_add:
+            new_cls_input = st.text_input("नई Class जोड़ें (उदा. 8-A):", key="new_cls_add_key")
+            if st.button("➕ Add New Class", use_container_width=True):
+                c_clean = new_cls_input.strip()
+                if c_clean and c_clean not in st.session_state.classes_list:
+                    st.session_state.classes_list.append(c_clean)
+                    st.success(f"Class '{c_clean}' जोड़ी गई!")
+                    st.rerun()
+        with col_c_del:
+            st.write("")
+            st.write("")
+            if st.button("🗑️ Delete Class", type="secondary", use_container_width=True):
+                if len(st.session_state.classes_list) > 1:
+                    st.session_state.classes_list.remove(sel_entry_class)
+                    st.session_state.allotments_df = st.session_state.allotments_df[st.session_state.allotments_df["Class"] != sel_entry_class]
+                    st.warning(f"Class '{sel_entry_class}' हटा दी गई!")
+                    st.rerun()
+                else:
+                    st.error("कम से कम एक Class होनी आवश्यक है!")
+
+        # Class Load Status Indicator
+        class_current_rows = st.session_state.allotments_df[st.session_state.allotments_df["Class"] == sel_entry_class].copy()
+        cls_allotted_periods = class_current_rows["Periods/Week"].sum() if not class_current_rows.empty else 0
+
+        col_stat1, col_stat2 = st.columns([3, 2])
+        with col_stat1:
+            st.write(f"**{sel_entry_class} का कुल लोड:** `{cls_allotted_periods} / {slots_per_class}` पीरियड्स प्रति सप्ताह")
+            st.progress(min(1.0, cls_allotted_periods / slots_per_class if slots_per_class > 0 else 0))
+        with col_stat2:
+            if cls_allotted_periods == slots_per_class:
+                st.success(f"✅ एकदम सही: {slots_per_class} स्लॉट्स पूरे हैं।")
+            elif cls_allotted_periods < slots_per_class:
+                st.info(f"ℹ️ {slots_per_class - cls_allotted_periods} स्लॉट्स खाली हैं (बाकी में लाइब्रेरी / सेल्फ-स्टडी आ जाएगी)।")
+            else:
+                st.error(f"⚠️ ओवरफ्लो: {cls_allotted_periods - slots_per_class} पीरियड कम करने होंगे।")
+
+        # Quick Add Single Subject Form
+        with st.form(f"quick_add_form_{sel_entry_class}", clear_on_submit=True):
+            st.write(f"**{sel_entry_class} में नया विषय और शिक्षक जोड़ें:**")
+            col_f1, col_f2, col_f3, col_f4 = st.columns([3, 3, 2, 2])
+            with col_f1:
+                in_subj = st.text_input("Subject का नाम:", placeholder="उदा. Mathematics, Science...")
+            with col_f2:
+                in_teacher = st.text_input("Teacher का नाम:", placeholder="उदा. Nikum Sir, Sharma Sir...")
+            with col_f3:
+                in_periods = st.number_input("Periods/Week:", 1, slots_per_class, 6)
+            with col_f4:
+                st.write("")
+                st.write("")
+                submit_add = st.form_submit_button("➕ Add Subject", use_container_width=True)
+
+            if submit_add:
+                s_c = in_subj.strip()
+                t_c = in_teacher.strip()
+                if s_c and t_c:
+                    new_row = pd.DataFrame([{"Class": sel_entry_class, "Subject": s_c, "Teacher": t_c, "Periods/Week": in_periods}])
+                    st.session_state.allotments_df = pd.concat([st.session_state.allotments_df, new_row], ignore_index=True)
+                    st.success(f"✅ {sel_entry_class} में '{s_c} ({t_c})' जोड़ दिया गया!")
+                    st.rerun()
+                else:
+                    st.error("कृपया Subject और Teacher दोनों भरें!")
+
+        # Class-Specific Table Editor
+        st.write(f"##### 📝 {sel_entry_class} की विषय व शिक्षक सूची (सीधे टेबल में भी एडिट/डिलीट कर सकते हैं):")
+        class_table = class_current_rows[["Subject", "Teacher", "Periods/Week"]].reset_index(drop=True)
+        edited_class_table = st.data_editor(
+            class_table, 
+            num_rows="dynamic", 
+            use_container_width=True, 
+            key=f"class_editor_{sel_entry_class}"
+        )
+
+        # Sync changes back to master df
+        if not edited_class_table.equals(class_table):
+            cleaned_sub = edited_class_table.dropna(subset=["Subject", "Teacher"])
+            cleaned_sub["Class"] = sel_entry_class
+            other_rows = st.session_state.allotments_df[st.session_state.allotments_df["Class"] != sel_entry_class]
+            st.session_state.allotments_df = pd.concat([other_rows, cleaned_sub[["Class", "Subject", "Teacher", "Periods/Week"]]], ignore_index=True)
+            st.rerun()
+
+        # Clone / Copy Section Tool
+        other_classes = [c for c in st.session_state.classes_list if c != sel_entry_class]
+        if other_classes:
+            with st.expander(f"📋 {sel_entry_class} के सभी विषय किसी अन्य सेक्शन में कॉपी करें (Quick Replicate)"):
+                col_cp1, col_cp2 = st.columns([3, 2])
+                with col_cp1:
+                    target_cls = st.selectbox(f"किस सेक्शन में कॉपी करना है?", other_classes)
+                with col_cp2:
+                    st.write("")
+                    st.write("")
+                    if st.button(f"Copy All to {target_cls}", use_container_width=True):
+                        src_rows = st.session_state.allotments_df[st.session_state.allotments_df["Class"] == sel_entry_class].copy()
+                        src_rows["Class"] = target_cls
+                        other_than_target = st.session_state.allotments_df[st.session_state.allotments_df["Class"] != target_cls]
+                        st.session_state.allotments_df = pd.concat([other_than_target, src_rows], ignore_index=True)
+                        st.success(f"✅ {sel_entry_class} के सारे विषय '{target_cls}' में कॉपी हो गए!")
+                        st.rerun()
+
+    # ================= MODE 2: FULL MASTER TABLE EDITOR =================
+    elif "Full Master" in entry_mode:
+        st.markdown("#### 📋 सभी क्लासेस की संयुक्त मास्टर टेबल (Full Master Editor)")
+        st.caption("यहाँ सभी क्लासेस और टीचर्स का डेटा एक साथ देख सकते हैं और सीधे एडिट कर सकते हैं:")
+        classes_str = st.text_input("Active Classes List (अल्पविराम से अलग करें):", value=", ".join(st.session_state.classes_list))
+        st.session_state.classes_list = [c.strip() for c in classes_str.split(",") if c.strip()]
+        st.session_state.allotments_df = st.data_editor(st.session_state.allotments_df, num_rows="dynamic", use_container_width=True)
+
+    # ================= MODE 3: BULK UPLOAD EXCEL / CSV =================
+    else:
+        st.markdown("#### 📥 बल्क अपलोड (Excel या CSV फ़ाइल से)")
         col_up1, col_up2 = st.columns([3, 1])
         with col_up1:
             uploaded_file = st.file_uploader(
@@ -453,11 +536,13 @@ with tab_setup:
                 st.error(f"फ़ाइल लोड करने में त्रुटि: {e}")
 
     # ================= LIVE HEALTH & PRE-CHECK DASHBOARD =================
+    st.markdown("---")
+    st.subheader("3. Live System Health & Capacity Audit")
+
     curr_df = st.session_state.allotments_df
     curr_classes = st.session_state.classes_list
     total_teachers = curr_df[curr_df["Teacher"] != "Supervised Activity"]["Teacher"].nunique()
     total_req_periods = curr_df["Periods/Week"].sum()
-    slots_per_class = int(st.session_state.working_days) * int(st.session_state.periods_per_day)
     total_avail_slots = len(curr_classes) * slots_per_class
 
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
@@ -476,10 +561,7 @@ with tab_setup:
     else:
         st.success("✅ **डेटा तैयार व संतुलित है:** किसी भी शिक्षक या क्लास में स्लॉट ओवरफ्लो नहीं है।")
 
-    st.markdown("##### 📝 Allotment Table Editor (सीधे टेबल में भी एडिट कर सकते हैं):")
-    st.session_state.allotments_df = st.data_editor(st.session_state.allotments_df, num_rows="dynamic", use_container_width=True)
-
-    btn_disabled = bool(issues)
+    btn_disabled = bool(issues) or len(curr_classes) == 0
     if st.button("🚀 Generate Conflict-Free Timetable (Instant)", type="primary", use_container_width=True, disabled=btn_disabled):
         with st.spinner("Google OR-Tools CP-SAT मॉडल टाइमटेबल हल कर रहा है..."):
             res = solve_school_timetable(current_timeline, current_dismissal)
