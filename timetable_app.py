@@ -299,7 +299,7 @@ def solve_school_timetable(timeline, dismissal_time, time_limit=15.0):
 
 # ================= USER INTERFACE =================
 st.title("🏫 School Timetable Pro (Deterministic & Timing Engine)")
-st.caption("Google OR-Tools CP-SAT सटीक शेड्यूलर + एक्सेल बल्क अपलोड, कक्षा-वार मैन्युअल एंट्री और एक्टिविटी/लैब पीरियड्स")
+st.caption("Google OR-Tools CP-SAT सटीक शेड्यूलर + मल्टी-क्लास शिक्षक अलॉटमेंट, एक्सेल बल्क अपलोड और एक्टिविटी/लैब पीरियड्स")
 
 tab_setup, tab_class_view, tab_teacher_view, tab_audit = st.tabs([
     "⚙️ 1. Setup & Allotments", 
@@ -432,7 +432,7 @@ with tab_setup:
             except Exception as e:
                 st.error(f"फ़ाइल लोड करने में त्रुटि: {e}")
 
-    # ================= 2B: CLASS & SECTION WISE MANUAL ENTRY & ACTIVITY PERIODS =================
+    # ================= 2B: CLASS & SECTION WISE MANUAL ENTRY & MULTI-CLASS ALLOTMENT =================
     st.markdown("#### 🏫 2. Class & Section-Wise Manual Entry (कक्षा-वार विषय व एक्टिविटी पीरियड्स जोड़ें)")
     
     col_c_sel, col_c_add, col_c_del = st.columns([3, 2, 1])
@@ -444,7 +444,7 @@ with tab_setup:
             st.session_state.classes_list
         )
     with col_c_add:
-        new_cls_input = st.text_input("नई Class जोड़ें (उदा. 8-A):", key="new_cls_add_key_v7")
+        new_cls_input = st.text_input("नई Class जोड़ें (उदा. 8-A):", key="new_cls_add_key_v8")
         if st.button("➕ Add New Class", use_container_width=True):
             c_clean = new_cls_input.strip()
             if c_clean and c_clean not in st.session_state.classes_list:
@@ -485,7 +485,7 @@ with tab_setup:
 
     # Quick Activity Presets Bar
     st.write(f"**{sel_entry_class} में विषय या स्पेशल एक्टिविटी / लैब पीरियड जोड़ें:**")
-    st.caption("💡 नीचे दिए गए किसी भी बटन पर क्लिक करके सीधे कॉमन एक्टिविटी जोड़ें या कस्टम विषय भरें:")
+    st.caption("💡 नीचे दिए गए किसी भी बटन पर क्लिक करके सीधे कॉमन एक्टिविटी जोड़ें या नीचे दिए गए फ़ॉर्म से मल्टी-क्लास असाइन करें:")
     
     act_c1, act_c2, act_c3, act_c4, act_c5, act_c6 = st.columns(6)
     preset_choice = None
@@ -503,49 +503,94 @@ with tab_setup:
         st.success(f"✅ {sel_entry_class} में '{p_sub} ({p_tea})' जोड़ दिया गया!")
         st.rerun()
 
-    # Manual Add Form
-    with st.form(f"manual_add_form_{sel_entry_class}", clear_on_submit=True):
-        col_f1, col_f2, col_f3, col_f4 = st.columns([3, 3, 2, 2])
+    # Manual Add Form with Multi-Class & Section Selection
+    with st.form(f"manual_add_form_{sel_entry_class}", clear_on_submit=False):
+        col_f1, col_f2 = st.columns([1, 1])
         with col_f1:
-            in_subj = st.text_input("Subject / Activity का नाम:", placeholder="उदा. Physics, Science Lab, Yoga...")
+            in_subj = st.text_input("Subject / Activity का नाम:", placeholder="उदा. Mathematics, Science Lab, Yoga...")
         with col_f2:
-            in_teacher = st.text_input("Teacher / Lab / In-charge का नाम:", placeholder="उदा. Sharma Sir, Computer Lab, Coach...")
+            in_teacher = st.text_input("Teacher / Lab / In-charge का नाम:", placeholder="उदा. Nikum Sir, Sharma Sir, Computer Lab...")
+
+        # Class / Sections Selection right before Periods/Week
+        col_f3, col_f4, col_f5 = st.columns([2.5, 1.2, 1.3])
         with col_f3:
-            in_periods = st.number_input("Periods / Week:", 1, slots_per_class, 4)
+            in_classes = st.multiselect(
+                "Class & Sections (एक साथ कई क्लासेस चुन सकते हैं, जैसे 8-A और 7-B):",
+                options=st.session_state.classes_list,
+                default=[sel_entry_class] if sel_entry_class in st.session_state.classes_list else [],
+                help="अगर शिक्षक एक से अधिक क्लासेज में पढ़ाते हैं तो उन सभी को यहाँ सेलेक्ट करें।"
+            )
         with col_f4:
+            in_periods = st.number_input("Periods / Week:", 1, slots_per_class, 6)
+        with col_f5:
             st.write("")
             st.write("")
-            submit_add = st.form_submit_button("➕ Add to Class", use_container_width=True)
+            submit_add = st.form_submit_button("➕ Allot Subject", use_container_width=True, type="primary")
 
         if submit_add:
             s_c = in_subj.strip()
             t_c = in_teacher.strip()
-            if s_c and t_c:
-                new_row = pd.DataFrame([{"Class": sel_entry_class, "Subject": s_c, "Teacher": t_c, "Periods/Week": int(in_periods)}])
-                st.session_state.allotments_df = pd.concat([st.session_state.allotments_df, new_row], ignore_index=True)
-                st.success(f"✅ {sel_entry_class} में '{s_c} ({t_c})' जोड़ दिया गया!")
+            target_cls_list = in_classes if in_classes else [sel_entry_class]
+            if s_c and t_c and target_cls_list:
+                new_entries = []
+                for c_target in target_cls_list:
+                    if c_target not in st.session_state.classes_list:
+                        st.session_state.classes_list.append(c_target)
+                    new_entries.append({
+                        "Class": c_target,
+                        "Subject": s_c,
+                        "Teacher": t_c,
+                        "Periods/Week": int(in_periods)
+                    })
+                st.session_state.allotments_df = pd.concat([st.session_state.allotments_df, pd.DataFrame(new_entries)], ignore_index=True)
+                st.success(f"✅ '{s_c} ({t_c})' को {', '.join(target_cls_list)} में प्रति सप्ताह {in_periods} पीरियड्स के साथ जोड़ दिया गया!")
                 st.rerun()
             else:
-                st.error("कृपया Subject/Activity और Teacher/In-charge दोनों भरें!")
+                st.error("कृपया Subject, Teacher और कम से कम एक Class अवश्य चुनें!")
 
-    # Class-Specific Table Editor
-    st.write(f"##### 📝 {sel_entry_class} की विषय व एक्टिविटी सूची (सीधे टेबल में एडिट/डिलीट करें):")
-    class_table = class_current_rows[["Subject", "Teacher", "Periods/Week"]].reset_index(drop=True)
-    edited_class_table = st.data_editor(
-        class_table, 
-        num_rows="dynamic", 
-        use_container_width=True, 
-        key=f"class_editor_{sel_entry_class}"
-    )
+    # View Allotments Tabs (Class-Wise vs Teacher-Wise)
+    tab_view_cls, tab_view_tch = st.tabs([
+        f"🏫 {sel_entry_class} की विषय व एक्टिविटी सूची",
+        "👨‍🏫 Teacher-Wise Roster (देखें किस शिक्षक के पास कौन-कौन सी क्लासेज हैं)"
+    ])
 
-    # Sync changes back to master df
-    if not edited_class_table.equals(class_table):
-        cleaned_sub = edited_class_table.dropna(subset=["Subject", "Teacher"]).copy()
-        cleaned_sub["Class"] = sel_entry_class
-        cleaned_sub["Periods/Week"] = pd.to_numeric(cleaned_sub["Periods/Week"], errors="coerce").fillna(4).astype(int).clip(lower=1)
-        other_rows = st.session_state.allotments_df[st.session_state.allotments_df["Class"] != sel_entry_class]
-        st.session_state.allotments_df = pd.concat([other_rows, cleaned_sub[["Class", "Subject", "Teacher", "Periods/Week"]]], ignore_index=True)
-        st.rerun()
+    with tab_view_cls:
+        st.write(f"##### 📝 {sel_entry_class} के अलॉटमेंट्स (सीधे टेबल में एडिट/डिलीट करें):")
+        class_table = class_current_rows[["Subject", "Teacher", "Periods/Week"]].reset_index(drop=True)
+        edited_class_table = st.data_editor(
+            class_table, 
+            num_rows="dynamic", 
+            use_container_width=True, 
+            key=f"class_editor_{sel_entry_class}"
+        )
+
+        if not edited_class_table.equals(class_table):
+            cleaned_sub = edited_class_table.dropna(subset=["Subject", "Teacher"]).copy()
+            cleaned_sub["Class"] = sel_entry_class
+            cleaned_sub["Periods/Week"] = pd.to_numeric(cleaned_sub["Periods/Week"], errors="coerce").fillna(4).astype(int).clip(lower=1)
+            other_rows = st.session_state.allotments_df[st.session_state.allotments_df["Class"] != sel_entry_class]
+            st.session_state.allotments_df = pd.concat([other_rows, cleaned_sub[["Class", "Subject", "Teacher", "Periods/Week"]]], ignore_index=True)
+            st.rerun()
+
+    with tab_view_tch:
+        active_teachers_list = sorted([t for t in st.session_state.allotments_df["Teacher"].dropna().unique() if t != "Supervised Activity"])
+        if active_teachers_list:
+            sel_view_teacher = st.selectbox("शिक्षक चुनें:", active_teachers_list)
+            t_rows = st.session_state.allotments_df[st.session_state.allotments_df["Teacher"] == sel_view_teacher]
+            t_total_periods = int(pd.to_numeric(t_rows["Periods/Week"], errors="coerce").fillna(0).sum())
+            st.write(f"**{sel_view_teacher} का कुल वर्कलोड:** `{t_total_periods} / {slots_per_class}` पीरियड्स प्रति सप्ताह")
+            
+            t_display = t_rows[["Class", "Subject", "Periods/Week"]].reset_index(drop=True)
+            edited_t_table = st.data_editor(t_display, num_rows="dynamic", use_container_width=True, key=f"t_editor_{sel_view_teacher}")
+            if not edited_t_table.equals(t_display):
+                cleaned_t = edited_t_table.dropna(subset=["Class", "Subject"]).copy()
+                cleaned_t["Teacher"] = sel_view_teacher
+                cleaned_t["Periods/Week"] = pd.to_numeric(cleaned_t["Periods/Week"], errors="coerce").fillna(4).astype(int).clip(lower=1)
+                other_t_rows = st.session_state.allotments_df[st.session_state.allotments_df["Teacher"] != sel_view_teacher]
+                st.session_state.allotments_df = pd.concat([other_t_rows, cleaned_t[["Class", "Subject", "Teacher", "Periods/Week"]]], ignore_index=True)
+                st.rerun()
+        else:
+            st.info("अभी कोई शिक्षक नहीं जुड़े हैं।")
 
     # Clone / Copy Section Tool
     other_classes = [c for c in st.session_state.classes_list if c != sel_entry_class]
