@@ -770,109 +770,151 @@ with tab_setup:
 
 
     with tab_view_cls:
-        st.write(f"##### 📝 {sel_entry_class} के अलॉटमेंट्स (टेबल में सीधे 'Class' कॉलम में एक साथ कई क्लासेस चुन सकते हैं):")
+        st.write(f"##### 📝 {sel_entry_class} के अलॉटमेंट्स (टेबल में सीधे Dropdown से क्लास व सेक्शन चुनें):")
         
-        # Build table with Subject | Teacher | Class & Section (multiple) | Periods/Week
-        table_rows = []
-        for _, r in class_current_rows.iterrows():
-            sub = str(r["Subject"]).strip()
-            tea = str(r["Teacher"]).strip()
-            try:
-                pw = int(pd.to_numeric(r["Periods/Week"], errors="coerce"))
-                if pw <= 0: pw = 4
-            except:
-                pw = 4
+        # View Mode Radio Selector
+        col_m1, col_m2 = st.columns([3, 2])
+        with col_m1:
+            tbl_mode_cls = st.radio(
+                "टेबल व्यू स्टाइल चुनें:",
+                ["🔽 सीधा ड्रॉपडाउन मोड (हर पंक्ति में क्लास का सीधा Dropdown - सबसे आसान)", "🏷️ ग्रुप व्यू (एक साथ कई क्लासेस + Add/Remove ड्रॉपडाउन)"],
+                horizontal=True,
+                key=f"tbl_mode_cls_{sel_entry_class}"
+            )
+        with col_m2:
+            st.caption("💡 **टिप:** 'सीधा ड्रॉपडाउन मोड' में हर सेल पर क्लिक करते ही क्लास व सेक्शन का असली ड्रॉपडाउन मेन्यू खुलता है।")
+
+        if tbl_mode_cls.startswith("🔽"):
+            # Mode 1: Direct Dropdown per Row
+            class_table = class_current_rows[["Subject", "Teacher", "Class", "Periods/Week"]].rename(columns={"Class": "Class & Section"}).reset_index(drop=True)
             
-            # Find all classes that share this exact Subject, Teacher, and Periods/Week
-            matched_cls = st.session_state.allotments_df[
-                (st.session_state.allotments_df["Subject"] == sub) & 
-                (st.session_state.allotments_df["Teacher"] == tea) & 
-                (st.session_state.allotments_df["Periods/Week"] == pw)
-            ]["Class"].unique().tolist()
-            
-            if sel_entry_class not in matched_cls:
-                matched_cls.append(sel_entry_class)
-            
-            matched_cls = sorted(list(set(matched_cls)))
-            table_rows.append({
-                "Subject": sub,
-                "Teacher": tea,
-                "Class & Section": matched_cls,
-                "Periods/Week": pw
-            })
-            
-        class_table = pd.DataFrame(table_rows)
-        if class_table.empty:
-            class_table = pd.DataFrame(columns=["Subject", "Teacher", "Class & Section", "Periods/Week"])
+            col_config_single = {
+                "Subject": st.column_config.TextColumn("Subject", required=True, width="medium"),
+                "Teacher": st.column_config.TextColumn("Teacher", required=True, width="medium"),
+                "Class & Section": st.column_config.SelectboxColumn("Class & Section", help="ड्रॉपडाउन से क्लास व सेक्शन चुनें", options=avail_classes, required=True, width="medium"),
+                "Periods/Week": st.column_config.NumberColumn("Periods/Week", min_value=1, max_value=slots_per_class, step=1, required=True, width="small")
+            }
+
+            edited_single = st.data_editor(
+                class_table,
+                column_config=col_config_single,
+                num_rows="dynamic",
+                use_container_width=True,
+                key=f"single_editor_{sel_entry_class}"
+            )
+
+            if not edited_single.equals(class_table):
+                cleaned = edited_single.dropna(subset=["Subject", "Teacher"]).copy()
+                cleaned["Class & Section"] = cleaned["Class & Section"].fillna(sel_entry_class)
+                cleaned["Periods/Week"] = pd.to_numeric(cleaned["Periods/Week"], errors="coerce").fillna(4).astype(int).clip(lower=1)
+                cleaned = cleaned.rename(columns={"Class & Section": "Class"})
+                other_rows = st.session_state.allotments_df[st.session_state.allotments_df["Class"] != sel_entry_class]
+                st.session_state.allotments_df = pd.concat([other_rows, cleaned[["Class", "Subject", "Teacher", "Periods/Week"]]], ignore_index=True)
+                st.rerun()
+
         else:
-            class_table = class_table[["Subject", "Teacher", "Class & Section", "Periods/Week"]]
-
-        edited_class_table = st.data_editor(
-            class_table, 
-            column_config=editor_col_config,
-            num_rows="dynamic", 
-            use_container_width=True, 
-            key=f"class_editor_{sel_entry_class}"
-        )
-
-        if not edited_class_table.equals(class_table):
-            # 1. Track which (Class, Subject, Teacher) tuples were originally displayed
-            old_tuples = set()
-            for _, r in class_table.iterrows():
-                s = str(r["Subject"]).strip()
-                t = str(r["Teacher"]).strip()
-                c_val = r.get("Class & Section", r.get("Class", []))
-                c_list = c_val if isinstance(c_val, (list, tuple, set)) else [x.strip() for x in str(c_val).replace(";", ",").split(",") if x.strip()]
-                for c in c_list:
-                    old_tuples.add((c, s, t))
-
-            # 2. Parse edited rows
-            new_rows = []
-            classes_to_clean = set()
-            for _, r in edited_class_table.iterrows():
-                s = str(r.get("Subject", "")).strip()
-                t = str(r.get("Teacher", "")).strip()
-                if not s or not t or pd.isna(s) or pd.isna(t) or s.lower() in ["nan", "none", ""] or t.lower() in ["nan", "none", ""]:
-                    continue
-                
+            # Mode 2: Grouped View with Add/Remove Dropdown
+            table_rows = []
+            for _, r in class_current_rows.iterrows():
+                sub = str(r["Subject"]).strip()
+                tea = str(r["Teacher"]).strip()
                 try:
-                    pw = int(pd.to_numeric(r.get("Periods/Week", 4), errors="coerce"))
+                    pw = int(pd.to_numeric(r["Periods/Week"], errors="coerce"))
                     if pw <= 0: pw = 4
                 except:
                     pw = 4
                 
-                c_val = r.get("Class & Section", r.get("Class", [sel_entry_class]))
-                if isinstance(c_val, (list, tuple, set)):
-                    c_list = [str(x).strip() for x in c_val if str(x).strip()]
-                elif isinstance(c_val, str):
-                    c_list = [x.strip() for x in c_val.replace(";", ",").split(",") if x.strip()]
-                elif pd.isna(c_val) or c_val is None:
-                    c_list = []
-                else:
-                    c_list = [str(c_val).strip()]
+                matched_cls = st.session_state.allotments_df[
+                    (st.session_state.allotments_df["Subject"] == sub) & 
+                    (st.session_state.allotments_df["Teacher"] == tea) & 
+                    (st.session_state.allotments_df["Periods/Week"] == pw)
+                ]["Class"].unique().tolist()
                 
-                if not c_list:
-                    c_list = [sel_entry_class]
+                if sel_entry_class not in matched_cls:
+                    matched_cls.append(sel_entry_class)
                 
-                for c in c_list:
-                    if c:
-                        if c not in st.session_state.classes_list:
-                            st.session_state.classes_list.append(c)
-                        new_rows.append({"Class": c, "Subject": s, "Teacher": t, "Periods/Week": pw})
-                        classes_to_clean.add((c, s))
+                matched_cls = sorted(list(set(matched_cls)))
+                table_rows.append({
+                    "Subject": sub,
+                    "Teacher": tea,
+                    "Assigned Classes": ", ".join(matched_cls),
+                    "+ Add/Remove Class": "-- Dropdown से क्लास चुनें --",
+                    "Periods/Week": pw
+                })
+                
+            grouped_df = pd.DataFrame(table_rows)
+            if grouped_df.empty:
+                grouped_df = pd.DataFrame(columns=["Subject", "Teacher", "Assigned Classes", "+ Add/Remove Class", "Periods/Week"])
+            else:
+                grouped_df = grouped_df[["Subject", "Teacher", "Assigned Classes", "+ Add/Remove Class", "Periods/Week"]]
 
-            def should_keep(row):
-                tup = (row["Class"], row["Subject"], row["Teacher"])
-                if tup in old_tuples:
-                    return False
-                if (row["Class"], row["Subject"]) in classes_to_clean:
-                    return False
-                return True
+            col_config_grp = {
+                "Subject": st.column_config.TextColumn("Subject", required=True, width="medium"),
+                "Teacher": st.column_config.TextColumn("Teacher", required=True, width="medium"),
+                "Assigned Classes": st.column_config.TextColumn("Assigned Classes", help="इस शिक्षक को असाइन की गई क्लासेस", disabled=True, width="large"),
+                "+ Add/Remove Class": st.column_config.SelectboxColumn("+ Add/Remove Class", help="ड्रॉपडाउन से कोई भी क्लास चुनें (जोड़ने या हटाने के लिए)", options=["-- Dropdown से क्लास चुनें --"] + avail_classes, required=True, width="medium"),
+                "Periods/Week": st.column_config.NumberColumn("Periods/Week", min_value=1, max_value=slots_per_class, step=1, required=True, width="small")
+            }
 
-            kept_df = st.session_state.allotments_df[st.session_state.allotments_df.apply(should_keep, axis=1)]
-            st.session_state.allotments_df = pd.concat([kept_df, pd.DataFrame(new_rows)], ignore_index=True)
-            st.rerun()
+            edited_grp = st.data_editor(
+                grouped_df,
+                column_config=col_config_grp,
+                num_rows="dynamic",
+                use_container_width=True,
+                key=f"grp_editor_{sel_entry_class}"
+            )
 
+            if not edited_grp.equals(grouped_df):
+                old_tuples = set()
+                for _, r in grouped_df.iterrows():
+                    s = str(r["Subject"]).strip()
+                    t = str(r["Teacher"]).strip()
+                    c_list = [c.strip() for c in str(r["Assigned Classes"]).split(",") if c.strip()]
+                    for c in c_list:
+                        old_tuples.add((c, s, t))
+
+                new_rows = []
+                classes_to_clean = set()
+                for idx, r in edited_grp.iterrows():
+                    s = str(r.get("Subject", "")).strip()
+                    t = str(r.get("Teacher", "")).strip()
+                    if not s or not t or pd.isna(s) or pd.isna(t) or s.lower() in ["nan", "none", ""] or t.lower() in ["nan", "none", ""]:
+                        continue
+                    try:
+                        pw = int(pd.to_numeric(r.get("Periods/Week", 4), errors="coerce").fillna(4))
+                        if pw <= 0: pw = 4
+                    except:
+                        pw = 4
+                    
+                    curr_classes = [c.strip() for c in str(r.get("Assigned Classes", "")).split(",") if c.strip()]
+                    action_cls = r.get("+ Add/Remove Class", "")
+                    if action_cls and action_cls != "-- Dropdown से क्लास चुनें --" and action_cls in avail_classes:
+                        if action_cls in curr_classes:
+                            curr_classes.remove(action_cls)
+                        else:
+                            curr_classes.append(action_cls)
+                    
+                    if not curr_classes:
+                        curr_classes = [sel_entry_class]
+                    
+                    for c in curr_classes:
+                        if c:
+                            if c not in st.session_state.classes_list:
+                                st.session_state.classes_list.append(c)
+                            new_rows.append({"Class": c, "Subject": s, "Teacher": t, "Periods/Week": pw})
+                            classes_to_clean.add((c, s))
+
+                def should_keep(row):
+                    tup = (row["Class"], row["Subject"], row["Teacher"])
+                    if tup in old_tuples:
+                        return False
+                    if (row["Class"], row["Subject"]) in classes_to_clean:
+                        return False
+                    return True
+
+                kept_df = st.session_state.allotments_df[st.session_state.allotments_df.apply(should_keep, axis=1)]
+                st.session_state.allotments_df = pd.concat([kept_df, pd.DataFrame(new_rows)], ignore_index=True)
+                st.rerun()
 
     with tab_view_tch:
         active_teachers_list = sorted([t for t in st.session_state.allotments_df["Teacher"].dropna().unique() if t != "Supervised Activity"])
@@ -895,58 +937,107 @@ with tab_setup:
             st.info("अभी कोई शिक्षक नहीं जुड़े हैं।")
 
     with tab_view_all:
-        st.write("##### 📋 स्कूल के सभी विषय व शिक्षकों की संयुक्त सूची (सीधे 'Class' कॉलम में मल्टीपल क्लासेस जोड़ें/हटाएं):")
-        all_table_rows = []
-        if not st.session_state.allotments_df.empty:
-            for (sub, tea, pw), grp in st.session_state.allotments_df.groupby(["Subject", "Teacher", "Periods/Week"], as_index=False):
-                all_table_rows.append({
-                    "Subject": sub,
-                    "Teacher": tea,
-                    "Class & Section": sorted(list(grp["Class"].unique())),
-                    "Periods/Week": int(pw)
-                })
-        master_multi_df = pd.DataFrame(all_table_rows)
-        if master_multi_df.empty:
-            master_multi_df = pd.DataFrame(columns=["Subject", "Teacher", "Class & Section", "Periods/Week"])
-        else:
-            master_multi_df = master_multi_df[["Subject", "Teacher", "Class & Section", "Periods/Week"]]
-            
-        edited_master_table = st.data_editor(
-            master_multi_df,
-            column_config=editor_col_config,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="master_multi_editor"
-        )
+        st.write("##### 📋 स्कूल के सभी विषय व शिक्षकों की संयुक्त सूची (सीधे Dropdown से क्लास चुनें):")
+        
+        col_all_m1, col_all_m2 = st.columns([3, 2])
+        with col_all_m1:
+            tbl_mode_all = st.radio(
+                "मास्टर टेबल व्यू स्टाइल चुनें:",
+                ["🔽 सीधा ड्रॉपडाउन मोड (हर पंक्ति में क्लास का सीधा Dropdown - सबसे आसान)", "🏷️ ग्रुप व्यू (एक साथ कई क्लासेस + Add/Remove ड्रॉपडाउन)"],
+                horizontal=True,
+                key="tbl_mode_all_master"
+            )
+        with col_all_m2:
+            st.caption("💡 'सीधा ड्रॉपडाउन मोड' में आप किसी भी क्लास का ड्रॉपडाउन खोलकर क्लास बदल सकते हैं।")
 
-        if not edited_master_table.equals(master_multi_df):
-            new_m_rows = []
-            for _, r in edited_master_table.iterrows():
-                s = str(r.get("Subject", "")).strip()
-                t = str(r.get("Teacher", "")).strip()
-                if not s or not t or s.lower() in ["nan", "none", ""] or t.lower() in ["nan", "none", ""]:
-                    continue
-                try:
-                    pw = int(pd.to_numeric(r.get("Periods/Week", 4), errors="coerce").fillna(4))
-                    if pw <= 0: pw = 4
-                except:
-                    pw = 4
-                c_val = r.get("Class & Section", r.get("Class", []))
-                if isinstance(c_val, (list, tuple, set)):
-                    c_list = [str(x).strip() for x in c_val if str(x).strip()]
-                elif isinstance(c_val, str):
-                    c_list = [x.strip() for x in c_val.replace(";", ",").split(",") if x.strip()]
-                else:
-                    c_list = []
-                for c in c_list:
-                    if c:
-                        if c not in st.session_state.classes_list:
-                            st.session_state.classes_list.append(c)
-                        new_m_rows.append({"Class": c, "Subject": s, "Teacher": t, "Periods/Week": pw})
-            if new_m_rows:
-                st.session_state.allotments_df = pd.DataFrame(new_m_rows)
+        if tbl_mode_all.startswith("🔽"):
+            all_display = st.session_state.allotments_df[["Subject", "Teacher", "Class", "Periods/Week"]].rename(columns={"Class": "Class & Section"}).reset_index(drop=True)
+            
+            col_config_all_single = {
+                "Subject": st.column_config.TextColumn("Subject", required=True, width="medium"),
+                "Teacher": st.column_config.TextColumn("Teacher", required=True, width="medium"),
+                "Class & Section": st.column_config.SelectboxColumn("Class & Section", help="ड्रॉपडाउन से क्लास व सेक्शन चुनें", options=avail_classes, required=True, width="medium"),
+                "Periods/Week": st.column_config.NumberColumn("Periods/Week", min_value=1, max_value=slots_per_class, step=1, required=True, width="small")
+            }
+
+            edited_all_single = st.data_editor(
+                all_display,
+                column_config=col_config_all_single,
+                num_rows="dynamic",
+                use_container_width=True,
+                key="master_single_editor"
+            )
+
+            if not edited_all_single.equals(all_display):
+                cleaned_all = edited_all_single.dropna(subset=["Subject", "Teacher"]).copy()
+                cleaned_all["Class & Section"] = cleaned_all["Class & Section"].fillna(avail_classes[0])
+                cleaned_all["Periods/Week"] = pd.to_numeric(cleaned_all["Periods/Week"], errors="coerce").fillna(4).astype(int).clip(lower=1)
+                cleaned_all = cleaned_all.rename(columns={"Class & Section": "Class"})
+                st.session_state.allotments_df = cleaned_all[["Class", "Subject", "Teacher", "Periods/Week"]].reset_index(drop=True)
                 st.rerun()
 
+        else:
+            all_table_rows = []
+            if not st.session_state.allotments_df.empty:
+                for (sub, tea, pw), grp in st.session_state.allotments_df.groupby(["Subject", "Teacher", "Periods/Week"], as_index=False):
+                    all_table_rows.append({
+                        "Subject": sub,
+                        "Teacher": tea,
+                        "Assigned Classes": ", ".join(sorted(list(grp["Class"].unique()))),
+                        "+ Add/Remove Class": "-- Dropdown से क्लास चुनें --",
+                        "Periods/Week": int(pw)
+                    })
+            master_multi_df = pd.DataFrame(all_table_rows)
+            if master_multi_df.empty:
+                master_multi_df = pd.DataFrame(columns=["Subject", "Teacher", "Assigned Classes", "+ Add/Remove Class", "Periods/Week"])
+            else:
+                master_multi_df = master_multi_df[["Subject", "Teacher", "Assigned Classes", "+ Add/Remove Class", "Periods/Week"]]
+                
+            col_config_all_grp = {
+                "Subject": st.column_config.TextColumn("Subject", required=True, width="medium"),
+                "Teacher": st.column_config.TextColumn("Teacher", required=True, width="medium"),
+                "Assigned Classes": st.column_config.TextColumn("Assigned Classes", help="इस शिक्षक को असाइन की गई क्लासेस", disabled=True, width="large"),
+                "+ Add/Remove Class": st.column_config.SelectboxColumn("+ Add/Remove Class", help="ड्रॉपडाउन से कोई भी क्लास चुनें (जोड़ने या हटाने के लिए)", options=["-- Dropdown से क्लास चुनें --"] + avail_classes, required=True, width="medium"),
+                "Periods/Week": st.column_config.NumberColumn("Periods/Week", min_value=1, max_value=slots_per_class, step=1, required=True, width="small")
+            }
+
+            edited_master_table = st.data_editor(
+                master_multi_df,
+                column_config=col_config_all_grp,
+                num_rows="dynamic",
+                use_container_width=True,
+                key="master_multi_editor"
+            )
+
+            if not edited_master_table.equals(master_multi_df):
+                new_m_rows = []
+                for _, r in edited_master_table.iterrows():
+                    s = str(r.get("Subject", "")).strip()
+                    t = str(r.get("Teacher", "")).strip()
+                    if not s or not t or s.lower() in ["nan", "none", ""] or t.lower() in ["nan", "none", ""]:
+                        continue
+                    try:
+                        pw = int(pd.to_numeric(r.get("Periods/Week", 4), errors="coerce").fillna(4))
+                        if pw <= 0: pw = 4
+                    except:
+                        pw = 4
+                    
+                    curr_classes = [c.strip() for c in str(r.get("Assigned Classes", "")).split(",") if c.strip()]
+                    action_cls = r.get("+ Add/Remove Class", "")
+                    if action_cls and action_cls != "-- Dropdown से क्लास चुनें --" and action_cls in avail_classes:
+                        if action_cls in curr_classes:
+                            curr_classes.remove(action_cls)
+                        else:
+                            curr_classes.append(action_cls)
+                    
+                    for c in curr_classes:
+                        if c:
+                            if c not in st.session_state.classes_list:
+                                st.session_state.classes_list.append(c)
+                            new_m_rows.append({"Class": c, "Subject": s, "Teacher": t, "Periods/Week": pw})
+                if new_m_rows:
+                    st.session_state.allotments_df = pd.DataFrame(new_m_rows)
+                    st.rerun()
 
     # Clone / Copy Section Tool
     other_classes = [c for c in st.session_state.classes_list if c != sel_entry_class]
