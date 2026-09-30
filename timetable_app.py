@@ -470,29 +470,159 @@ with tab_setup:
                 st.error(f"फ़ाइल लोड करने में त्रुटि: {e}")
 
 
-    # ================= 2B: CLASS & SECTION WISE MANUAL ENTRY & MULTI-CLASS ALLOTMENT =================
-    st.markdown("#### 🏫 2. Class & Section-Wise Manual Entry (कक्षा-वार विषय व एक्टिविटी पीरियड्स जोड़ें)")
-    
-    col_c_sel, col_c_add, col_c_del = st.columns([3, 2, 1])
+    # ================= 2B: SCHOOL CLASSES & SECTIONS SETUP (NURSERY TO 12TH WIZARD) =================
+    st.markdown("#### 🏫 2. School Classes & Sections Setup (Nursery से 12th तक कक्षाएँ व सेक्शंस जोड़ें)")
+    st.caption("💡 **Step 1:** पहले चुनें कि स्कूल में कौन-कौन सी क्लासेस हैं (Nursery से 12 तक) | **Step 2:** फिर प्रत्येक क्लास के सामने Dropdown से कुल Sections (A, B, C...) चुनें:")
+
+    STANDARD_CLASSES = ["Nursery", "LKG", "UKG", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12"]
+    SECTION_OPTIONS = [
+        "1 Section (A)", 
+        "2 Sections (A, B)", 
+        "3 Sections (A, B, C)", 
+        "4 Sections (A, B, C, D)", 
+        "5 Sections (A, B, C, D, E)", 
+        "6 Sections (A, B, C, D, E, F)",
+        "No Section (Only Class Name)"
+    ]
+    SECTION_LETTER_MAP = {
+        "1 Section (A)": ["A"],
+        "2 Sections (A, B)": ["A", "B"],
+        "3 Sections (A, B, C)": ["A", "B", "C"],
+        "4 Sections (A, B, C, D)": ["A", "B", "C", "D"],
+        "5 Sections (A, B, C, D, E)": ["A", "B", "C", "D", "E"],
+        "6 Sections (A, B, C, D, E, F)": ["A", "B", "C", "D", "E", "F"],
+        "No Section (Only Class Name)": [""]
+    }
+
+    with st.expander("⚙️ Class & Section Setup Wizard (Nursery से 12th तक क्लासेज व सेक्शंस एक साथ सेट करें)", expanded=True):
+        st.write("**त्वरित प्रीसेट (Quick Presets):**")
+        p_c1, p_c2, p_c3, p_c4, p_c5 = st.columns(5)
+        if p_c1.button("🏫 Full (Nursery-12)", use_container_width=True):
+            st.session_state.selected_school_grades = STANDARD_CLASSES[:]
+            st.rerun()
+        if p_c2.button("🎒 Primary (1st-5th)", use_container_width=True):
+            st.session_state.selected_school_grades = ["1", "2", "3", "4", "5"]
+            st.rerun()
+        if p_c3.button("📘 Middle (6th-8th)", use_container_width=True):
+            st.session_state.selected_school_grades = ["6", "7", "8"]
+            st.rerun()
+        if p_c4.button("🎓 Secondary (9th-12th)", use_container_width=True):
+            st.session_state.selected_school_grades = ["9", "10", "11", "12"]
+            st.rerun()
+        if p_c5.button("⭐ Default (6 & 7)", use_container_width=True):
+            st.session_state.selected_school_grades = ["6", "7"]
+            st.rerun()
+
+        if "selected_school_grades" not in st.session_state:
+            init_grades = set()
+            for c in st.session_state.classes_list:
+                base_g = c.split("-")[0].strip()
+                if base_g in STANDARD_CLASSES:
+                    init_grades.add(base_g)
+            st.session_state.selected_school_grades = sorted(list(init_grades), key=lambda x: STANDARD_CLASSES.index(x) if x in STANDARD_CLASSES else 99) or ["6", "7"]
+
+        chosen_grades = st.multiselect(
+            "1. स्कूल में कौन-कौन सी Classes हैं चुनें (Nursery से 12 तक):",
+            options=STANDARD_CLASSES,
+            default=[g for g in st.session_state.selected_school_grades if g in STANDARD_CLASSES],
+            help="यहाँ अपनी स्कूल की सभी कक्षाएँ सेलेक्ट करें। सेलेक्ट करते ही नीचे प्रत्येक क्लास के सेक्शंस चुनने का विकल्प आ जाएगा।"
+        )
+        st.session_state.selected_school_grades = chosen_grades
+
+        if chosen_grades:
+            st.write("**2. प्रत्येक चुनी गई Class के आगे Sections (A से आगे तक) Dropdown से चुनें:**")
+            
+            # Quick apply sections across all chosen classes
+            q_col1, q_col2 = st.columns([3, 2])
+            with q_col1:
+                quick_sec_all = st.selectbox(
+                    "⚡ सभी चुनी गई Classes के लिए एक साथ Sections सेट करें (Quick Apply):",
+                    [
+                        "-- प्रत्येक क्लास का अलग-अलग सेट करें --",
+                        "1 Section (A)",
+                        "2 Sections (A, B)",
+                        "3 Sections (A, B, C)",
+                        "4 Sections (A, B, C, D)",
+                        "5 Sections (A, B, C, D, E)",
+                        "6 Sections (A, B, C, D, E, F)"
+                    ]
+                )
+            with q_col2:
+                st.write("")
+                st.write("")
+                if quick_sec_all != "-- प्रत्येक क्लास का अलग-अलग सेट करें --" and st.button("⚡ Apply to All Selected Classes", use_container_width=True):
+                    for g in chosen_grades:
+                        st.session_state[f"sec_sel_{g}"] = quick_sec_all
+                    st.success(f"सभी क्लासेस के लिए '{quick_sec_all}' सेट हो गया!")
+                    st.rerun()
+
+            # Grid of per-class dropdowns
+            g_cols = st.columns(3)
+            for idx, grade in enumerate(chosen_grades):
+                with g_cols[idx % 3]:
+                    default_val = st.session_state.get(
+                        f"sec_sel_{grade}", 
+                        "1 Section (A)" if grade in ["Nursery", "LKG", "UKG"] else "2 Sections (A, B)"
+                    )
+                    val_idx = SECTION_OPTIONS.index(default_val) if default_val in SECTION_OPTIONS else 1
+                    st.selectbox(
+                        f"📌 Class **{grade}** Sections:",
+                        options=SECTION_OPTIONS,
+                        index=val_idx,
+                        key=f"sec_sel_{grade}"
+                    )
+
+            # Generate list of classes
+            generated_classes = []
+            for g in chosen_grades:
+                sec_choice = st.session_state.get(f"sec_sel_{g}", "1 Section (A)" if g in ["Nursery", "LKG", "UKG"] else "2 Sections (A, B)")
+                letters = SECTION_LETTER_MAP.get(sec_choice, ["A", "B"])
+                for l in letters:
+                    if l:
+                        generated_classes.append(f"{g}-{l}")
+                    else:
+                        generated_classes.append(g)
+
+            st.info(f"📋 **तैयार होने वाली कुल {len(generated_classes)} Classes & Sections:** ")
+            
+            col_save1, col_save2 = st.columns([3, 1])
+            with col_save1:
+                st.caption("बटन दबाते ही यह सभी क्लासेज व सेक्शंस आपके टाइमटेबल और टेबल के ड्रॉपडाउन में सेव हो जाएंगे।")
+            with col_save2:
+                if st.button("💾 Save & Update Classes", type="primary", use_container_width=True):
+                    if generated_classes:
+                        st.session_state.classes_list = generated_classes
+                        st.success(f"✅ कुल {len(generated_classes)} क्लासेस व सेक्शंस अपडेट हो गए!")
+                        st.rerun()
+
+        # Option to add custom class if any
+        with st.expander("➕ कोई अतिरिक्त कस्टम क्लास जोड़ें (उदा. 11-Science, 12-Arts)", expanded=False):
+            c_add1, c_add2 = st.columns([3, 1])
+            with c_add1:
+                custom_cls = st.text_input("कस्टम क्लास का नाम:", placeholder="उदा. 11-Science")
+            with c_add2:
+                st.write("")
+                st.write("")
+                if st.button("➕ Add Custom", use_container_width=True):
+                    cc_clean = custom_cls.strip()
+                    if cc_clean and cc_clean not in st.session_state.classes_list:
+                        st.session_state.classes_list.append(cc_clean)
+                        st.success(f"Class '{cc_clean}' जोड़ी गई!")
+                        st.rerun()
+
+    # Active Class Selector & Delete
+    col_c_sel, col_c_del = st.columns([4, 1])
     with col_c_sel:
         if not st.session_state.classes_list:
             st.session_state.classes_list = ["6-A"]
         sel_entry_class = st.selectbox(
-            "जिस Class / Section का डेटा देखना या जोड़ना है उसे चुनें:", 
+            "वर्तमान में किस Class / Section का डेटा देखना या जोड़ना है चुनें:", 
             st.session_state.classes_list
         )
-    with col_c_add:
-        new_cls_input = st.text_input("नई Class जोड़ें (उदा. 8-A):", key="new_cls_add_key_v8")
-        if st.button("➕ Add New Class", use_container_width=True):
-            c_clean = new_cls_input.strip()
-            if c_clean and c_clean not in st.session_state.classes_list:
-                st.session_state.classes_list.append(c_clean)
-                st.success(f"Class '{c_clean}' जोड़ी गई!")
-                st.rerun()
     with col_c_del:
         st.write("")
         st.write("")
-        if st.button("🗑️ Delete Class", type="secondary", use_container_width=True):
+        if st.button("🗑️ Delete This Class", type="secondary", use_container_width=True):
             if len(st.session_state.classes_list) > 1:
                 st.session_state.classes_list.remove(sel_entry_class)
                 st.session_state.allotments_df = st.session_state.allotments_df[st.session_state.allotments_df["Class"] != sel_entry_class]
@@ -594,25 +724,32 @@ with tab_setup:
                 st.error("कृपया Subject, Teacher और कम से कम एक Class अवश्य चुनें!")
 
 
-    # Multi-select column configuration for Class (between Teacher and Periods/Week)
+    # Multi-select dropdown column configuration for 'Class & Section' (between Teacher and Periods/Week)
+    avail_classes = [str(c).strip() for c in st.session_state.classes_list if str(c).strip()]
+    if not avail_classes:
+        avail_classes = ["6-A"]
+
     class_col_cfg = None
     if hasattr(st.column_config, "MultiselectColumn"):
         class_col_cfg = st.column_config.MultiselectColumn(
-            "Class",
-            help="एक या अधिक Classes चुनें (उदा. 6-A, 6-B)",
-            options=st.session_state.classes_list,
-            default=[sel_entry_class] if sel_entry_class in st.session_state.classes_list else [],
+            "Class & Section",
+            help="ड्रॉपडाउन से एक या अधिक Classes & Sections चुनें (उदा. 6-A, 6-B, 7-A)",
+            options=avail_classes,
+            default=[sel_entry_class] if sel_entry_class in avail_classes else [avail_classes[0]],
+            required=True,
             width="medium"
         )
-    elif hasattr(st.column_config, "ListColumn"):
-        class_col_cfg = st.column_config.ListColumn(
-            "Class",
-            help="Classes की लिस्ट (उदा. 6-A, 6-B)",
+    elif hasattr(st.column_config, "SelectboxColumn"):
+        class_col_cfg = st.column_config.SelectboxColumn(
+            "Class & Section",
+            help="ड्रॉपडाउन से Class चुनें",
+            options=avail_classes,
+            required=True,
             width="medium"
         )
     else:
         class_col_cfg = st.column_config.TextColumn(
-            "Class",
+            "Class & Section",
             help="Classes (कॉमा लगाकर लिखें, जैसे 6-A, 6-B)",
             width="medium"
         )
@@ -620,7 +757,7 @@ with tab_setup:
     editor_col_config = {
         "Subject": st.column_config.TextColumn("Subject", required=True, width="medium"),
         "Teacher": st.column_config.TextColumn("Teacher", required=True, width="medium"),
-        "Class": class_col_cfg,
+        "Class & Section": class_col_cfg,
         "Periods/Week": st.column_config.NumberColumn("Periods/Week", min_value=1, max_value=slots_per_class, step=1, required=True, width="small")
     }
 
@@ -635,7 +772,7 @@ with tab_setup:
     with tab_view_cls:
         st.write(f"##### 📝 {sel_entry_class} के अलॉटमेंट्स (टेबल में सीधे 'Class' कॉलम में एक साथ कई क्लासेस चुन सकते हैं):")
         
-        # Build table with Subject | Teacher | Class (multiple) | Periods/Week
+        # Build table with Subject | Teacher | Class & Section (multiple) | Periods/Week
         table_rows = []
         for _, r in class_current_rows.iterrows():
             sub = str(r["Subject"]).strip()
@@ -660,15 +797,15 @@ with tab_setup:
             table_rows.append({
                 "Subject": sub,
                 "Teacher": tea,
-                "Class": matched_cls,
+                "Class & Section": matched_cls,
                 "Periods/Week": pw
             })
             
         class_table = pd.DataFrame(table_rows)
         if class_table.empty:
-            class_table = pd.DataFrame(columns=["Subject", "Teacher", "Class", "Periods/Week"])
+            class_table = pd.DataFrame(columns=["Subject", "Teacher", "Class & Section", "Periods/Week"])
         else:
-            class_table = class_table[["Subject", "Teacher", "Class", "Periods/Week"]]
+            class_table = class_table[["Subject", "Teacher", "Class & Section", "Periods/Week"]]
 
         edited_class_table = st.data_editor(
             class_table, 
@@ -684,7 +821,7 @@ with tab_setup:
             for _, r in class_table.iterrows():
                 s = str(r["Subject"]).strip()
                 t = str(r["Teacher"]).strip()
-                c_val = r["Class"]
+                c_val = r.get("Class & Section", r.get("Class", []))
                 c_list = c_val if isinstance(c_val, (list, tuple, set)) else [x.strip() for x in str(c_val).replace(";", ",").split(",") if x.strip()]
                 for c in c_list:
                     old_tuples.add((c, s, t))
@@ -704,7 +841,7 @@ with tab_setup:
                 except:
                     pw = 4
                 
-                c_val = r.get("Class", [sel_entry_class])
+                c_val = r.get("Class & Section", r.get("Class", [sel_entry_class]))
                 if isinstance(c_val, (list, tuple, set)):
                     c_list = [str(x).strip() for x in c_val if str(x).strip()]
                 elif isinstance(c_val, str):
@@ -765,14 +902,14 @@ with tab_setup:
                 all_table_rows.append({
                     "Subject": sub,
                     "Teacher": tea,
-                    "Class": sorted(list(grp["Class"].unique())),
+                    "Class & Section": sorted(list(grp["Class"].unique())),
                     "Periods/Week": int(pw)
                 })
         master_multi_df = pd.DataFrame(all_table_rows)
         if master_multi_df.empty:
-            master_multi_df = pd.DataFrame(columns=["Subject", "Teacher", "Class", "Periods/Week"])
+            master_multi_df = pd.DataFrame(columns=["Subject", "Teacher", "Class & Section", "Periods/Week"])
         else:
-            master_multi_df = master_multi_df[["Subject", "Teacher", "Class", "Periods/Week"]]
+            master_multi_df = master_multi_df[["Subject", "Teacher", "Class & Section", "Periods/Week"]]
             
         edited_master_table = st.data_editor(
             master_multi_df,
@@ -794,7 +931,7 @@ with tab_setup:
                     if pw <= 0: pw = 4
                 except:
                     pw = 4
-                c_val = r.get("Class", [])
+                c_val = r.get("Class & Section", r.get("Class", []))
                 if isinstance(c_val, (list, tuple, set)):
                     c_list = [str(x).strip() for x in c_val if str(x).strip()]
                 elif isinstance(c_val, str):
